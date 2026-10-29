@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>鬼画符解码器 · 手写批量识别</title>
-<meta name="description" content="手写图片批量识别：只抓手写内容和它前面的标签，一条一行带复制键；也能整页转写。一次最多 5 张，每张单独识别。">
+<meta name="description" content="手写图片批量识别：只抓手写内容和它前面的标签，一条一行带复制键；也能整页转写。每批 5 或 10 张，每张单独识别，两把 Key 额度用完自动换。">
 <meta name="theme-color" content="#1c1917">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>👻</text></svg>">
 <script src="https://cdn.tailwindcss.com"></script>
@@ -26,7 +26,7 @@
 
   <header class="px-1">
     <h1 class="text-2xl font-black tracking-tight">鬼画符解码器 <span class="align-middle text-xl">👻</span></h1>
-    <p class="mt-1 text-sm text-stone-500 dark:text-stone-400">手写图片批量识别 · 一次最多 5 张 · 每张单独识别，准确优先</p>
+    <p class="mt-1 text-sm text-stone-500 dark:text-stone-400">手写图片批量识别 · 每批 5 或 10 张 · 每张单独识别，准确优先</p>
   </header>
 
   <section class="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-stone-200 dark:bg-stone-900 dark:ring-stone-800">
@@ -37,16 +37,35 @@
         <a class="text-red-700 hover:underline dark:text-red-400" href="https://aistudio.google.com/rate-limit" target="_blank" rel="noopener">看额度</a>
       </div>
     </div>
-    <div class="flex gap-2">
-      <div class="relative min-w-0 flex-1">
-        <input id="apiKey" type="text" class="masked w-full rounded-xl border border-stone-300 bg-stone-50 px-3 py-2.5 pr-11 text-base outline-none focus:border-red-600 dark:border-stone-700 dark:bg-stone-950" placeholder="粘贴 Google AI Studio 的 API Key" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
-        <button id="toggleKey" type="button" class="absolute inset-y-0 right-0 px-3 text-stone-400" aria-label="显示或隐藏 Key">👁</button>
+    <div class="space-y-3">
+      <div>
+        <div class="mb-1 text-xs font-semibold text-stone-600 dark:text-stone-300">钥匙 1 · 主力</div>
+        <div class="flex gap-2">
+          <div class="relative min-w-0 flex-1">
+            <input id="apiKey" type="text" class="masked w-full rounded-xl border border-stone-300 bg-stone-50 px-3 py-2.5 pr-11 text-base outline-none focus:border-red-600 dark:border-stone-700 dark:bg-stone-950" placeholder="粘贴 Google AI Studio 的 API Key" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+            <button id="toggleKey" type="button" class="absolute inset-y-0 right-0 px-3 text-stone-400" aria-label="显示或隐藏 Key">👁</button>
+          </div>
+          <button id="saveKey" type="button" class="shrink-0 rounded-xl bg-stone-900 px-4 font-semibold text-white active:scale-95 dark:bg-stone-100 dark:text-stone-900">保存</button>
+        </div>
+        <div class="mt-1 flex items-center justify-between gap-2 text-xs text-stone-500 dark:text-stone-400">
+          <span id="keyStatus"></span>
+          <button id="clearKey" type="button" class="shrink-0 hover:text-red-600">清除</button>
+        </div>
       </div>
-      <button id="saveKey" type="button" class="shrink-0 rounded-xl bg-stone-900 px-4 font-semibold text-white active:scale-95 dark:bg-stone-100 dark:text-stone-900">保存</button>
-    </div>
-    <div class="mt-2 flex items-center justify-between gap-2 text-xs text-stone-500 dark:text-stone-400">
-      <span id="keyStatus">还没存 Key</span>
-      <button id="clearKey" type="button" class="shrink-0 hover:text-red-600">清除 Key</button>
+      <div>
+        <div class="mb-1 text-xs font-semibold text-stone-600 dark:text-stone-300">钥匙 2 · 备用：钥匙 1 没额度时自动换上</div>
+        <div class="flex gap-2">
+          <div class="relative min-w-0 flex-1">
+            <input id="apiKey2" type="text" class="masked w-full rounded-xl border border-stone-300 bg-stone-50 px-3 py-2.5 pr-11 text-base outline-none focus:border-red-600 dark:border-stone-700 dark:bg-stone-950" placeholder="另一个项目的 API Key（可以不填）" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+            <button id="toggleKey2" type="button" class="absolute inset-y-0 right-0 px-3 text-stone-400" aria-label="显示或隐藏 Key">👁</button>
+          </div>
+          <button id="saveKey2" type="button" class="shrink-0 rounded-xl bg-stone-900 px-4 font-semibold text-white active:scale-95 dark:bg-stone-100 dark:text-stone-900">保存</button>
+        </div>
+        <div class="mt-1 flex items-center justify-between gap-2 text-xs text-stone-500 dark:text-stone-400">
+          <span id="keyStatus2"></span>
+          <button id="clearKey2" type="button" class="shrink-0 hover:text-red-600">清除</button>
+        </div>
+      </div>
     </div>
     <div class="mt-3 flex gap-2">
       <select id="model" class="min-w-0 flex-1 rounded-xl border border-stone-300 bg-stone-50 px-3 py-2.5 text-base dark:border-stone-700 dark:bg-stone-950" aria-label="模型"></select>
@@ -58,12 +77,18 @@
   <section class="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-stone-200 dark:bg-stone-900 dark:ring-stone-800">
     <div class="mb-3 flex items-center justify-between">
       <h2 class="font-bold">② 上图 <span id="count" class="ml-1 text-sm font-normal text-stone-500 dark:text-stone-400">0/5</span></h2>
-      <button id="clearAll" type="button" class="text-xs text-stone-500 hover:text-red-600 dark:text-stone-400" hidden>清空</button>
+      <div class="flex items-center gap-3">
+        <button id="clearAll" type="button" class="text-xs text-stone-500 hover:text-red-600 dark:text-stone-400" hidden>清空</button>
+        <div class="grid grid-cols-2 gap-0.5 rounded-lg bg-stone-100 p-0.5 text-xs dark:bg-stone-800" role="tablist" aria-label="每批张数">
+          <button type="button" data-batch="5" role="tab">每批 5 张</button>
+          <button type="button" data-batch="10" role="tab">每批 10 张</button>
+        </div>
+      </div>
     </div>
     <label id="drop" for="fileInput" class="flex cursor-pointer select-none flex-col items-center justify-center rounded-xl border-2 border-dashed border-stone-300 px-4 py-7 text-center transition hover:border-red-600 dark:border-stone-700">
       <span class="text-3xl">📷</span>
       <span class="mt-2 font-semibold">点这里选图 / 拍照</span>
-      <span class="mt-1 text-xs text-stone-500 dark:text-stone-400">电脑上也能直接拖进来，或者 Ctrl+V 粘贴截图 · 最多 5 张</span>
+      <span class="mt-1 text-xs text-stone-500 dark:text-stone-400">电脑上也能直接拖进来，或者 Ctrl+V 粘贴截图 · 最多 <span id="dropMax">5</span> 张</span>
     </label>
     <input id="fileInput" type="file" accept="image/*" multiple class="sr-only">
     <div id="grid" class="mt-3 grid grid-cols-4 gap-2 empty:hidden sm:grid-cols-5"></div>
@@ -133,11 +158,13 @@
 const API = 'https://generativelanguage.googleapis.com/v1beta';
 const LS = {
   key: 'gemini_ocr_api_key', model: 'gemini_ocr_model_v2', extra: 'gemini_ocr_extra',
-  models: 'gemini_ocr_models', usage: 'gemini_ocr_usage', mode: 'gemini_ocr_mode'
+  models: 'gemini_ocr_models', usage: 'gemini_ocr_usage', mode: 'gemini_ocr_mode',
+  dead: 'gemini_ocr_key_dead', batch: 'gemini_ocr_batch'
 };
 // 长边 2048：整张 A4 表压到 1024 时中文小字只剩八九个像素，笔画糊掉
-// 一次最多 5 张，每张单独一次请求：互不串味，模型只盯一张
-const MAX_IMAGES = 5, MAX_SIDE = 2048, JPEG_Q = 0.92, TIMEOUT_MS = 180000;
+// 每批 5 或 10 张；每张单独一次请求（同时最多 5 个在路上）：互不串味，模型只盯一张
+const MAX_SIDE = 2048, JPEG_Q = 0.92, TIMEOUT_MS = 180000, PARALLEL = 5;
+let maxImages = 5;
 // 谷歌文档：2.5 系列只对以前用过的老用户开放，新项目用 3.5 Flash-Lite / 3.8 Flash
 const DEFAULT_MODEL = 'gemini-3.5-flash-lite';
 const PRESET_MODELS = [
@@ -240,28 +267,62 @@ function flash(btn, ok) {
   btn._t = setTimeout(() => { btn.textContent = btn.dataset.label; }, 1200);
 }
 
-/* ---------- API key ---------- */
-const getKey = () => (lsGet(LS.key) || '').trim();
-function renderKey() {
-  const k = getKey();
-  $('keyStatus').textContent = k ? `已保存（…${k.slice(-4)}），下次打开自动读取` : '还没存 Key';
-  if (k && !$('apiKey').value) $('apiKey').value = k;
+/* ---------- API keys：钥匙 1 主力，钥匙 2 备用；额度用完（429）自动换另一把 ---------- */
+const KEY_LS = { 1: 'gemini_ocr_api_key', 2: 'gemini_ocr_api_key_2' };
+const KEY_EL = { 1: ['apiKey', 'saveKey', 'clearKey', 'keyStatus', 'toggleKey'], 2: ['apiKey2', 'saveKey2', 'clearKey2', 'keyStatus2', 'toggleKey2'] };
+const getKey = (n = 1) => (lsGet(KEY_LS[n]) || '').trim();
+const hasKey = () => !!(getKey(1) || getKey(2));
+const deadMap = () => tryJson(lsGet(LS.dead) || '{}') || {};
+const deadUntil = n => deadMap()['k' + n] || 0;
+const clock = ms => { const d = new Date(ms); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+function markDead(n, until) {
+  const d = deadMap();
+  d['k' + n] = until;
+  lsSet(LS.dead, JSON.stringify(d));
+  renderKey();
 }
-$('saveKey').addEventListener('click', () => {
-  const k = $('apiKey').value.trim();
-  if (!k) { toast('先把 Key 粘进框里'); return; }
-  lsSet(LS.key, k);
-  renderKey();
-  toast(/^AIza[\w-]{30,}$/.test(k) ? 'Key 已存好' : 'Key 已存（格式有点怪，谷歌的 Key 一般是 AIza 开头）');
-  loadModels({ silent: true });
-});
-$('apiKey').addEventListener('keydown', e => { if (e.key === 'Enter') $('saveKey').click(); });
-$('toggleKey').addEventListener('click', () => $('apiKey').classList.toggle('masked'));
-$('clearKey').addEventListener('click', () => {
-  lsDel(LS.key);
-  $('apiKey').value = '';
-  renderKey();
-  toast('Key 已从这台设备删掉');
+// 没被额度卡住的钥匙排前面，同等情况钥匙 1 优先
+function keyOrder() {
+  const now = Date.now();
+  return [1, 2].filter(n => getKey(n)).sort((a, b) => ((deadUntil(a) > now) - (deadUntil(b) > now)) || a - b);
+}
+// 谷歌日额度在美国太平洋时间零点清零
+function nextPacificMidnight() {
+  const now = new Date();
+  const p = Object.fromEntries(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', hourCycle: 'h23', hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    .formatToParts(now).map(x => [x.type, x.value]));
+  const passed = (+p.hour % 24) * 3600 + (+p.minute) * 60 + (+p.second);
+  return now.getTime() + (86400 - passed) * 1000;
+}
+function renderKey() {
+  [1, 2].forEach(n => {
+    const [inp, , , st] = KEY_EL[n];
+    const k = getKey(n), until = deadUntil(n);
+    $(st).textContent = k
+      ? `已保存（…${k.slice(-4)}）` + (until > Date.now() ? ` · 额度暂时用完，${clock(until)} 后恢复` : '，下次打开自动读取')
+      : (n === 1 ? '还没存 Key' : '可以不填；要填就填另一个项目的 Key');
+    if (k && !$(inp).value) $(inp).value = k;
+  });
+}
+[1, 2].forEach(n => {
+  const [inp, save, clear, , toggle] = KEY_EL[n];
+  $(save).addEventListener('click', () => {
+    const k = $(inp).value.trim();
+    if (!k) { toast('先把 Key 粘进框里'); return; }
+    if (k === getKey(n === 1 ? 2 : 1)) { toast('两个框放的是同一把 Key，备用等于没放'); return; }
+    lsSet(KEY_LS[n], k);
+    markDead(n, 0);
+    toast(/^AIza[\w-]{30,}$/.test(k) ? `钥匙 ${n} 已存好` : `钥匙 ${n} 已存（格式有点怪，谷歌的 Key 一般是 AIza 开头）`);
+    loadModels({ silent: true });
+  });
+  $(inp).addEventListener('keydown', e => { if (e.key === 'Enter') $(save).click(); });
+  $(toggle).addEventListener('click', () => $(inp).classList.toggle('masked'));
+  $(clear).addEventListener('click', () => {
+    lsDel(KEY_LS[n]);
+    $(inp).value = '';
+    markDead(n, 0);
+    toast(`钥匙 ${n} 已从这台设备删掉`);
+  });
 });
 
 /* ---------- mode ---------- */
@@ -285,7 +346,7 @@ document.querySelectorAll('[data-mode]').forEach(b => b.addEventListener('click'
 
 /* ---------- Gemini calls（Key 只走 URL 参数 ?key=，不加任何自定义请求头） ---------- */
 const modelName = m => String(m || '').trim().replace(/^models\//, '');
-const keyParam = () => 'key=' + encodeURIComponent(getKey());
+const keyQS = n => 'key=' + encodeURIComponent(getKey(n));
 
 async function apiFetch(url, { method = 'POST', body, signal } = {}) {
   const init = { method, signal };
@@ -296,6 +357,7 @@ async function apiFetch(url, { method = 'POST', body, signal } = {}) {
   if (!res.ok) {
     const err = new Error((data && data.error && data.error.message) || raw.slice(0, 500) || res.statusText || '（谷歌没给说明）');
     err.status = res.status;
+    err.detail = JSON.stringify((data && data.error && data.error.details) || '');
     throw err;
   }
   if (data === undefined) throw new Error('返回的不是 JSON：' + raw.slice(0, 300));
@@ -331,9 +393,23 @@ function buildBody(list, extra, model, runMode) {
   };
 }
 
-function callModel(model, list, extra, runMode, signal) {
+// 只有额度用完（429）才换下一把钥匙；别的报错原样抛出
+async function callModel(model, list, extra, runMode, signal, tally) {
   const name = modelName(model);
-  return apiFetch(`${API}/models/${name}:generateContent?${keyParam()}`, { body: buildBody(list, extra, name, runMode), signal });
+  const body = buildBody(list, extra, name, runMode);
+  let lastErr = null;
+  for (const n of keyOrder()) {
+    try {
+      tally.req++;
+      const data = await apiFetch(`${API}/models/${name}:generateContent?${keyQS(n)}`, { body, signal });
+      return { data, keyNo: n };
+    } catch (e) {
+      lastErr = e;
+      if (e.status !== 429) throw e;
+      markDead(n, /PerDay|per day|daily/i.test(e.message + ' ' + (e.detail || '')) ? nextPacificMidnight() : Date.now() + 60000);
+    }
+  }
+  throw lastErr || new Error('没有可用的 Key');
 }
 
 function readResponse(data) {
@@ -449,14 +525,14 @@ function fillModels(live, note) {
 }
 
 async function loadModels({ silent = false } = {}) {
-  if (!getKey()) return false;
+  if (!hasKey()) return false;
   const btn = $('refreshModels');
   btn.disabled = true;
   $('refreshIcon').classList.add('animate-spin');
   try {
     let all = [], token = '', guard = 0;
     do {
-      const data = await apiFetch(`${API}/models?${keyParam()}${token ? '&pageToken=' + encodeURIComponent(token) : ''}`, { method: 'GET' });
+      const data = await apiFetch(`${API}/models?${keyQS(keyOrder()[0])}${token ? '&pageToken=' + encodeURIComponent(token) : ''}`, { method: 'GET' });
       all = all.concat(data.models || []);
       token = data.nextPageToken || '';
     } while (token && ++guard < 10);
@@ -475,8 +551,28 @@ async function loadModels({ silent = false } = {}) {
     $('refreshIcon').classList.remove('animate-spin');
   }
 }
-$('refreshModels').addEventListener('click', () => { if (!getKey()) { toast('先存 Key'); return; } loadModels(); });
+$('refreshModels').addEventListener('click', () => { if (!hasKey()) { toast('先存 Key'); return; } loadModels(); });
 $('model').addEventListener('change', () => lsSet(LS.model, $('model').value));
+
+/* ---------- batch size：每批 5 或 10 张 ---------- */
+const BATCH_BASE = 'rounded-md px-2.5 py-1 font-semibold transition ';
+function renderBatch() {
+  document.querySelectorAll('[data-batch]').forEach(b => {
+    const on = +b.dataset.batch === maxImages;
+    b.className = BATCH_BASE + (on ? MODE_ON : MODE_OFF);
+    b.setAttribute('aria-selected', String(on));
+  });
+  $('dropMax').textContent = maxImages;
+}
+document.querySelectorAll('[data-batch]').forEach(b => b.addEventListener('click', () => {
+  const n = +b.dataset.batch;
+  if (state.busy || n === maxImages) return;
+  if (state.items.length > n) { toast(`现在有 ${state.items.length} 张，先删到 ${n} 张以内再切`); return; }
+  maxImages = n;
+  lsSet(LS.batch, String(n));
+  renderBatch();
+  renderGrid();
+}));
 
 /* ---------- images ---------- */
 function loadImage(file) {
@@ -516,9 +612,9 @@ async function addFiles(files) {
   if (state.busy) { toast('识别中，等这一轮完了再加'); return; }
   const imgs = files.filter(f => f && (/^image\//.test(f.type) || /\.(jpe?g|png|webp|gif|bmp|heic|heif|avif)$/i.test(f.name || '')));
   if (!imgs.length) { toast('没认出图片文件'); return; }
-  const room = MAX_IMAGES - state.items.length;
-  if (room <= 0) { toast(`满了，最多 ${MAX_IMAGES} 张`); return; }
-  if (imgs.length > room) toast(`最多 ${MAX_IMAGES} 张，多出的 ${imgs.length - room} 张没收`);
+  const room = maxImages - state.items.length;
+  if (room <= 0) { toast(`满了，这一批最多 ${maxImages} 张`); return; }
+  if (imgs.length > room) toast(`这一批最多 ${maxImages} 张，多出的 ${imgs.length - room} 张没收`);
   let bad = 0;
   for (const f of imgs.slice(0, room)) {
     try {
@@ -567,7 +663,7 @@ function renderGrid() {
       ${it.status === 'error' ? '<span class="pointer-events-none absolute bottom-1 left-1 rounded bg-red-600/90 px-1 text-[10px] font-bold text-white">✗</span>' : it.done ? '<span class="pointer-events-none absolute bottom-1 left-1 rounded bg-emerald-600/90 px-1 text-[10px] font-bold text-white">✓</span>' : ''}
       <button type="button" data-del="${it.id}" class="absolute right-1 top-1 h-6 w-6 rounded-full bg-black/60 text-sm leading-6 text-white" aria-label="删掉这张">×</button>
     </div>`).join('');
-  $('count').textContent = `${state.items.length}/${MAX_IMAGES}`;
+  $('count').textContent = `${state.items.length}/${maxImages}`;
   $('clearAll').hidden = !state.items.length;
   const orig = state.items.reduce((s, x) => s + x.orig, 0), now = state.items.reduce((s, x) => s + x.bytes, 0);
   $('sizeInfo').textContent = state.items.length ? `已压到长边 ${MAX_SIDE}px：原图 ${fmtKB(orig)} → 上传 ${fmtKB(now)}` : '';
@@ -721,9 +817,24 @@ function updateRun() {
 }
 
 const pacificDay = () => { try { return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Los_Angeles' }).format(new Date()); } catch (e) { return new Date().toISOString().slice(0, 10); } };
-function getUsage() { const u = tryJson(lsGet(LS.usage) || '{}') || {}; return u.d === pacificDay() ? (u.n || 0) : 0; }
-function bumpUsage() { lsSet(LS.usage, JSON.stringify({ d: pacificDay(), n: getUsage() + 1 })); renderUsage(); }
-function renderUsage() { const n = getUsage(); $('usage').textContent = n ? `今日本机已用 ${n} 次` : ''; }
+function getUsage() { const u = tryJson(lsGet(LS.usage) || '{}') || {}; return u.d === pacificDay() ? u : { d: pacificDay(), n: 0 }; }
+function bumpUsage(k) {
+  const u = getUsage();
+  u.n = (u.n || 0) + 1;
+  u['k' + k] = (u['k' + k] || 0) + 1;
+  lsSet(LS.usage, JSON.stringify(u));
+  renderUsage();
+}
+function renderUsage() {
+  const u = getUsage();
+  $('usage').textContent = u.n ? `今日本机已用 ${u.n} 次` + (u.k2 ? `（钥匙1 ${u.k1 || 0} · 钥匙2 ${u.k2}）` : '') : '';
+}
+// 并发闸门：同时最多 size 个请求在路上
+async function pool(items, size, fn) {
+  let next = 0;
+  const worker = async () => { while (next < items.length) { const it = items[next++]; await fn(it); } };
+  await Promise.all(Array.from({ length: Math.min(size, items.length) }, worker));
+}
 
 function applyResult(it, { txt, finish }, runMode) {
   it.note = finish && finish !== 'STOP' ? finishNote(finish) : '';
@@ -742,7 +853,7 @@ function applyResult(it, { txt, finish }, runMode) {
 
 async function run(ids) {
   if (state.busy) return;
-  if (!getKey()) { toast('先在 ① 里填 Key 并保存'); $('apiKey').focus(); return; }
+  if (!hasKey()) { toast('先在 ① 里填 Key 并保存'); $('apiKey').focus(); return; }
   const list = ids ? state.items.filter(x => ids.includes(x.id)) : state.items.slice();
   if (!list.length) { toast('先上图'); return; }
   const extra = $('extra').value.trim();
@@ -760,13 +871,15 @@ async function run(ids) {
   if (!ids) $('resultsCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
   const t0 = performance.now();
   let finished = 0, tokens = 0;
+  const tally = { req: 0, k1: 0, k2: 0 };
   const tick = setInterval(() => { $('run').innerHTML = `<span class="spin"></span> 识别中 ${finished}/${list.length} · ${((performance.now() - t0) / 1000).toFixed(1)}s`; }, 100);
   const killer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
-  // 每张图单独一次请求，同时发出：互不串味，一张出错不连累别的
-  await Promise.all(list.map(async it => {
+  // 每张图单独一次请求：互不串味，一张出错不连累别的
+  await pool(list, PARALLEL, async it => {
     try {
-      const data = await callModel(model, [it], extra, runMode, ctrl.signal);
-      bumpUsage();
+      const { data, keyNo } = await callModel(model, [it], extra, runMode, ctrl.signal, tally);
+      bumpUsage(keyNo);
+      tally['k' + keyNo]++;
       const r = readResponse(data);
       tokens += r.tokens || 0;
       applyResult(it, r, runMode);
@@ -777,7 +890,7 @@ async function run(ids) {
       finished++;
       renderAll();
     }
-  }));
+  });
   clearInterval(tick);
   clearTimeout(killer);
   state.busy = false;
@@ -786,7 +899,8 @@ async function run(ids) {
   const ok = list.filter(x => x.status === 'done').length, bad = list.length - ok;
   const secs = ((performance.now() - t0) / 1000).toFixed(1);
   const nf = runMode === 'fields' ? ` · 共 ${list.reduce((s, x) => s + (x.status === 'done' && isFields(x) ? x.fields.length : 0), 0)} 条手写` : '';
-  $('runStatus').textContent = `${bad ? '⚠' : '✓'} ${ok}/${list.length} 张成功 · ${list.length} 次请求 · ${secs}s · ${model} · ${MODE_NAME[runMode]}${nf}${tokens ? ` · ${tokens} tokens` : ''}`;
+  const keys = tally.k2 ? ` · 钥匙1×${tally.k1} 钥匙2×${tally.k2}` : '';
+  $('runStatus').textContent = `${bad ? '⚠' : '✓'} ${ok}/${list.length} 张成功 · ${tally.req} 次请求 · ${secs}s · ${model} · ${MODE_NAME[runMode]}${nf}${keys}${tokens ? ` · ${tokens} tokens` : ''}`;
   if (bad) {
     $('runStatus').className = 'min-w-0 break-words text-red-600 dark:text-red-400';
     toast(`${bad} 张没成功，原因写在那张底下，点那张的「↻ 重识」再来`, 6000);
@@ -951,13 +1065,15 @@ $('copyAll').addEventListener('click', async () => {
 function init() {
   mode = lsGet(LS.mode) === 'text' ? 'text' : 'fields';
   renderMode();
+  maxImages = lsGet(LS.batch) === '10' ? 10 : 5;
+  renderBatch();
   renderKey();
   $('extra').value = lsGet(LS.extra) || '';
   const cached = tryJson(lsGet(LS.models) || 'null');
-  fillModels(cached && Array.isArray(cached.list) ? cached.list : [], getKey() ? '预置模型直接能用；正在后台拉谷歌实时名单…' : '预置模型直接能用；存好 Key 后会再拉一份谷歌实时名单');
+  fillModels(cached && Array.isArray(cached.list) ? cached.list : [], hasKey() ? '预置模型直接能用；正在后台拉谷歌实时名单…' : '预置模型直接能用；存好 Key 后会再拉一份谷歌实时名单');
   renderUsage();
   renderAll();
-  if (getKey()) loadModels({ silent: true });
+  if (hasKey()) loadModels({ silent: true });
 }
 init();
 })();
