@@ -1,0 +1,822 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>鬼画符解码器 · 手写批量识别</title>
+<meta name="description" content="手写图片批量识别：最多 10 张打包成一次 Gemini 请求，可校对，可导出 Excel / CSV / PDF / Word / Markdown / TXT。">
+<meta name="theme-color" content="#1c1917">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>👻</text></svg>">
+<script src="https://cdn.tailwindcss.com"></script>
+<script defer src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/html2pdf.js@0.14.0/dist/html2pdf.bundle.min.js"></script>
+<style>
+  html { -webkit-text-size-adjust: 100%; }
+  [hidden] { display: none !important; }
+  .masked { -webkit-text-security: disc; }
+  .drop-hot { border-color: #b91c1c !important; background: rgba(185, 28, 28, .06); }
+  .spin { width: 1em; height: 1em; border: 2px solid currentColor; border-right-color: transparent; border-radius: 9999px; display: inline-block; animation: spin .7s linear infinite; vertical-align: -.15em; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  textarea.auto { overflow: hidden; resize: none; }
+  #toast { bottom: calc(1.25rem + env(safe-area-inset-bottom)); }
+</style>
+</head>
+<body class="min-h-screen bg-stone-100 text-stone-900 antialiased dark:bg-stone-950 dark:text-stone-100">
+<main class="mx-auto max-w-3xl space-y-4 px-4 pb-16 pt-6">
+
+  <header class="px-1">
+    <h1 class="text-2xl font-black tracking-tight">鬼画符解码器 <span class="align-middle text-xl">👻</span></h1>
+    <p class="mt-1 text-sm text-stone-500 dark:text-stone-400">手写图片批量识别 · 最多 10 张打包成 1 次请求 · 只扣 1 次额度</p>
+  </header>
+
+  <section class="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-stone-200 dark:bg-stone-900 dark:ring-stone-800">
+    <div class="mb-3 flex items-center justify-between">
+      <h2 class="font-bold">① 钥匙与模型</h2>
+      <div class="space-x-3 text-xs">
+        <a class="text-red-700 hover:underline dark:text-red-400" href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">去拿 Key</a>
+        <a class="text-red-700 hover:underline dark:text-red-400" href="https://aistudio.google.com/rate-limit" target="_blank" rel="noopener">看额度</a>
+      </div>
+    </div>
+    <div class="flex gap-2">
+      <div class="relative min-w-0 flex-1">
+        <input id="apiKey" type="text" class="masked w-full rounded-xl border border-stone-300 bg-stone-50 px-3 py-2.5 pr-11 text-base outline-none focus:border-red-600 dark:border-stone-700 dark:bg-stone-950" placeholder="粘贴 Google AI Studio 的 API Key" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+        <button id="toggleKey" type="button" class="absolute inset-y-0 right-0 px-3 text-stone-400" aria-label="显示或隐藏 Key">👁</button>
+      </div>
+      <button id="saveKey" type="button" class="shrink-0 rounded-xl bg-stone-900 px-4 font-semibold text-white active:scale-95 dark:bg-stone-100 dark:text-stone-900">保存</button>
+    </div>
+    <div class="mt-2 flex items-center justify-between gap-2 text-xs text-stone-500 dark:text-stone-400">
+      <span id="keyStatus">还没存 Key</span>
+      <button id="clearKey" type="button" class="shrink-0 hover:text-red-600">清除 Key</button>
+    </div>
+    <div class="mt-3 flex gap-2">
+      <select id="model" class="min-w-0 flex-1 rounded-xl border border-stone-300 bg-stone-50 px-3 py-2.5 text-base dark:border-stone-700 dark:bg-stone-950" aria-label="模型"></select>
+      <button id="refreshModels" type="button" class="shrink-0 rounded-xl border border-stone-300 px-3.5 text-lg dark:border-stone-700" title="问谷歌要最新模型名单" aria-label="刷新模型名单"><span id="refreshIcon" class="inline-block">↻</span></button>
+    </div>
+    <p id="modelHint" class="mt-2 text-xs text-stone-500 dark:text-stone-400"></p>
+  </section>
+
+  <section class="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-stone-200 dark:bg-stone-900 dark:ring-stone-800">
+    <div class="mb-3 flex items-center justify-between">
+      <h2 class="font-bold">② 上图 <span id="count" class="ml-1 text-sm font-normal text-stone-500 dark:text-stone-400">0/10</span></h2>
+      <button id="clearAll" type="button" class="text-xs text-stone-500 hover:text-red-600 dark:text-stone-400" hidden>清空</button>
+    </div>
+    <label id="drop" for="fileInput" class="flex cursor-pointer select-none flex-col items-center justify-center rounded-xl border-2 border-dashed border-stone-300 px-4 py-7 text-center transition hover:border-red-600 dark:border-stone-700">
+      <span class="text-3xl">📷</span>
+      <span class="mt-2 font-semibold">点这里选图 / 拍照</span>
+      <span class="mt-1 text-xs text-stone-500 dark:text-stone-400">电脑上也能直接拖进来，或者 Ctrl+V 粘贴截图 · 最多 10 张</span>
+    </label>
+    <input id="fileInput" type="file" accept="image/*" multiple class="sr-only">
+    <div id="grid" class="mt-3 grid grid-cols-4 gap-2 empty:hidden sm:grid-cols-5"></div>
+    <p id="sizeInfo" class="mt-2 text-xs text-stone-500 dark:text-stone-400"></p>
+  </section>
+
+  <section class="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-stone-200 dark:bg-stone-900 dark:ring-stone-800">
+    <h2 class="mb-3 font-bold">③ 开干</h2>
+    <input id="extra" type="text" class="w-full rounded-xl border border-stone-300 bg-stone-50 px-3 py-2.5 text-base outline-none focus:border-red-600 dark:border-stone-700 dark:bg-stone-950" placeholder="附加要求（可选）：如「算出算式结果」「只提取金额」">
+    <div class="mt-3 flex gap-2">
+      <button id="run" type="button" class="flex-1 rounded-xl bg-red-700 px-4 py-3 text-base font-bold text-white shadow-sm active:scale-[.98] disabled:cursor-not-allowed disabled:opacity-40">开始识别</button>
+      <button id="cancel" type="button" class="shrink-0 rounded-xl border border-stone-300 px-4 dark:border-stone-700" hidden>取消</button>
+    </div>
+    <div class="mt-2 flex items-start justify-between gap-3 text-xs text-stone-500 dark:text-stone-400">
+      <span id="runStatus" class="min-w-0 break-words"></span>
+      <span id="usage" class="shrink-0" title="按谷歌额度重置时间（美国太平洋时间零点）计"></span>
+    </div>
+  </section>
+
+  <section id="resultsCard" class="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-stone-200 dark:bg-stone-900 dark:ring-stone-800" hidden>
+    <div class="mb-3 flex items-center justify-between gap-2">
+      <h2 class="font-bold">④ 校对</h2>
+      <span class="text-xs text-stone-500 dark:text-stone-400">点缩略图看大图 · 字可以直接改</span>
+    </div>
+    <div id="rows" class="space-y-4"></div>
+  </section>
+
+  <section id="exportCard" class="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-stone-200 dark:bg-stone-900 dark:ring-stone-800" hidden>
+    <div class="mb-3 flex items-center justify-between gap-2">
+      <h2 class="font-bold">⑤ 带走</h2>
+      <span class="text-xs text-stone-500 dark:text-stone-400">导出的是你改过之后的字</span>
+    </div>
+    <div class="grid grid-cols-2 gap-2 sm:grid-cols-3">
+      <button type="button" data-exp="xlsx" class="rounded-xl border border-stone-300 py-2.5 text-sm font-semibold active:scale-95 disabled:opacity-50 dark:border-stone-700">Excel .xlsx</button>
+      <button type="button" data-exp="csv" class="rounded-xl border border-stone-300 py-2.5 text-sm font-semibold active:scale-95 disabled:opacity-50 dark:border-stone-700">CSV .csv</button>
+      <button type="button" data-exp="pdf" class="rounded-xl border border-stone-300 py-2.5 text-sm font-semibold active:scale-95 disabled:opacity-50 dark:border-stone-700">PDF .pdf</button>
+      <button type="button" data-exp="doc" class="rounded-xl border border-stone-300 py-2.5 text-sm font-semibold active:scale-95 disabled:opacity-50 dark:border-stone-700">Word .doc</button>
+      <button type="button" data-exp="md" class="rounded-xl border border-stone-300 py-2.5 text-sm font-semibold active:scale-95 disabled:opacity-50 dark:border-stone-700">Markdown .md</button>
+      <button type="button" data-exp="txt" class="rounded-xl border border-stone-300 py-2.5 text-sm font-semibold active:scale-95 disabled:opacity-50 dark:border-stone-700">纯文本 .txt</button>
+    </div>
+    <button id="copyAll" type="button" class="mt-2 w-full rounded-xl bg-stone-900 py-3 font-bold text-white active:scale-[.98] dark:bg-stone-100 dark:text-stone-900">一键复制全部文本</button>
+  </section>
+
+  <footer class="space-y-1 px-1 pt-2 text-xs leading-relaxed text-stone-400 dark:text-stone-500">
+    <p>考古守则：被划掉、涂黑的字按阵亡处理，本机不做招魂；认不出的一律画 □，不编、不猜、不替原作者背锅。</p>
+    <p>字丑不在保修范围——AI 认不出的，原作者大概率自己也认不出。</p>
+    <p>Key 只存在这台设备的浏览器里；图片和 Key 只发给谷歌，不经过任何别的服务器。</p>
+  </footer>
+</main>
+
+<div id="toast" class="pointer-events-none fixed inset-x-0 z-50 flex justify-center px-4" hidden>
+  <div id="toastMsg" class="max-w-md rounded-xl bg-stone-900/95 px-4 py-2.5 text-sm text-white shadow-lg dark:bg-stone-100/95 dark:text-stone-900"></div>
+</div>
+<div id="lightbox" class="fixed inset-0 z-40 flex items-center justify-center bg-black/90 p-3" hidden>
+  <img id="lbImg" alt="原图" class="max-h-full max-w-full rounded-lg">
+</div>
+
+<script>
+(() => {
+'use strict';
+
+const API = 'https://generativelanguage.googleapis.com/v1beta';
+const LS = {
+  key: 'gemini_ocr_api_key', model: 'gemini_ocr_model', extra: 'gemini_ocr_extra',
+  models: 'gemini_ocr_models', usage: 'gemini_ocr_usage', plain: 'gemini_ocr_plain_models'
+};
+const MAX_IMAGES = 10, MAX_SIDE = 1024, JPEG_Q = 0.85, TIMEOUT_MS = 180000;
+const DEFAULT_MODEL = 'gemini-2.5-flash-lite';
+const FALLBACK_MODELS = [
+  { id: 'gemini-2.5-flash-lite', lite: true },
+  { id: 'gemini-flash-lite-latest', lite: true, alias: true },
+  { id: 'gemini-2.5-flash', lite: false },
+  { id: 'gemini-flash-latest', lite: false, alias: true }
+];
+const SYSTEM_PROMPT = [
+  '你是一台纯粹的手写 OCR 引擎，唯一任务是把图片里的文字原样转写出来。',
+  '规则：',
+  '1. 精准识别手写和印刷的文字、数字、标点、单位、数学符号与算式，按原样转写；不纠错、不补全、不翻译、不润色。',
+  '2. 被横线划掉、涂黑、打叉作废的内容一律忽略，不输出。',
+  '3. 保持原图的换行和段落；表格逐行输出，同一行的单元格之间用“ | ”分隔。',
+  '4. 实在认不出的字用 □ 代替，不要猜。',
+  '5. 图里没有文字时，text 为空字符串。',
+  '6. 不要任何解释、说明、寒暄，不要 Markdown 代码块。',
+  '7. 只输出 JSON 数组，每张图一个对象：{"index": 图片编号, "text": "转写内容"}；index 从 1 开始，与图片编号一一对应，不遗漏、不合并、不重复。'
+].join('\n');
+
+const $ = id => document.getElementById(id);
+const state = { items: [], busy: false, ctrl: null, keyMode: 'header', seq: 0 };
+
+/* ---------- small helpers ---------- */
+const lsGet = k => { try { return localStorage.getItem(k); } catch (e) { return null; } };
+const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) { /* storage blocked */ } };
+const lsDel = k => { try { localStorage.removeItem(k); } catch (e) { /* storage blocked */ } };
+const tryJson = s => { try { return JSON.parse(s); } catch (e) { return undefined; } };
+const escHtml = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const pad = n => String(n).padStart(2, '0');
+const stamp = () => { const d = new Date(); return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}`; };
+const humanTime = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+const fname = ext => `鬼画符_${stamp()}.${ext}`;
+const fmtKB = b => b >= 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB';
+let plainModels = new Set(tryJson(lsGet(LS.plain) || '[]') || []);
+
+let toastTimer = 0;
+function toast(msg, ms = 2600) {
+  $('toastMsg').textContent = msg;
+  $('toast').hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { $('toast').hidden = true; }, ms);
+}
+
+/* ---------- API key ---------- */
+const getKey = () => (lsGet(LS.key) || '').trim();
+function renderKey() {
+  const k = getKey();
+  $('keyStatus').textContent = k ? `已保存（…${k.slice(-4)}），下次打开自动读取` : '还没存 Key';
+  if (k && !$('apiKey').value) $('apiKey').value = k;
+}
+$('saveKey').addEventListener('click', () => {
+  const k = $('apiKey').value.trim();
+  if (!k) { toast('先把 Key 粘进框里'); return; }
+  lsSet(LS.key, k);
+  renderKey();
+  toast(/^AIza[\w-]{30,}$/.test(k) ? 'Key 已存好' : 'Key 已存（格式有点怪，谷歌的 Key 一般是 AIza 开头）');
+  loadModels({ silent: true });
+});
+$('apiKey').addEventListener('keydown', e => { if (e.key === 'Enter') $('saveKey').click(); });
+$('toggleKey').addEventListener('click', () => $('apiKey').classList.toggle('masked'));
+$('clearKey').addEventListener('click', () => {
+  lsDel(LS.key);
+  $('apiKey').value = '';
+  renderKey();
+  toast('Key 已从这台设备删掉');
+});
+
+/* ---------- Gemini calls ---------- */
+async function apiFetch(url, { method = 'POST', body, signal } = {}) {
+  const key = getKey();
+  const init = { method, signal, headers: {} };
+  if (body !== undefined) { init.headers['Content-Type'] = 'application/json'; init.body = JSON.stringify(body); }
+  let res = null;
+  if (state.keyMode === 'header') {
+    try {
+      res = await fetch(url, { ...init, headers: { ...init.headers, 'x-goog-api-key': key } });
+    } catch (e) {
+      if (e.name === 'AbortError') throw e;
+      state.keyMode = 'query'; // header blocked somewhere: fall back to ?key=
+    }
+  }
+  if (!res) res = await fetch(url + (url.includes('?') ? '&' : '?') + 'key=' + encodeURIComponent(key), init);
+  const raw = await res.text();
+  const data = raw ? tryJson(raw) : {};
+  if (!res.ok) {
+    const err = new Error((data && data.error && data.error.message) || `HTTP ${res.status}`);
+    err.status = res.status;
+    throw err;
+  }
+  if (data === undefined) throw new Error('谷歌回了看不懂的东西');
+  return data;
+}
+
+function genConfig(model, plain) {
+  const g = { responseMimeType: 'application/json' };
+  const m = /^gemini-(\d+)/.exec(model);
+  const major = m ? +m[1] : 99;
+  if (major < 3) g.temperature = 0.1; // Gemini 3+ 官方建议保持默认温度，压低反而容易复读
+  if (!plain) {
+    g.responseSchema = {
+      type: 'ARRAY',
+      items: { type: 'OBJECT', properties: { index: { type: 'INTEGER' }, text: { type: 'STRING' } }, required: ['index', 'text'] }
+    };
+    if (/^gemini-2\.5-flash(?!-lite)/.test(model)) g.thinkingConfig = { thinkingBudget: 0 };
+    else if (major >= 3 && major < 99 && !/lite/.test(model)) g.thinkingConfig = { thinkingLevel: 'low' };
+  }
+  return g;
+}
+
+function buildBody(list, extra, model, plain) {
+  const n = list.length;
+  const parts = [{
+    text: `下面共有 ${n} 张图片，按顺序编号 1 到 ${n}，每张图前面有编号标签。逐张转写。` +
+      (extra ? `\n附加要求（照做，结果写进对应图片的 text 里）：${extra}` : '')
+  }];
+  list.forEach((it, i) => {
+    parts.push({ text: `【图片 ${i + 1}】` });
+    parts.push({ inline_data: { mime_type: 'image/jpeg', data: it.b64 } });
+  });
+  parts.push({ text: `只输出 JSON 数组 [{"index":1,"text":"..."}]，index 从 1 到 ${n} 各出现一次。` });
+  return {
+    systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+    contents: [{ role: 'user', parts }],
+    generationConfig: genConfig(model, plain)
+  };
+}
+
+async function callModel(model, list, extra, signal) {
+  const url = `${API}/models/${encodeURIComponent(model)}:generateContent`;
+  const plain = plainModels.has(model);
+  try {
+    return await apiFetch(url, { body: buildBody(list, extra, model, plain), signal });
+  } catch (e) {
+    // 这个模型不吃 schema / thinking 参数：记下来，以后对它直接发素版请求
+    if (e.status === 400 && !plain && /schema|thinking|generation_?config|unknown name|invalid json payload|not supported|response_?mime/i.test(e.message)) {
+      plainModels.add(model);
+      lsSet(LS.plain, JSON.stringify([...plainModels]));
+      return await apiFetch(url, { body: buildBody(list, extra, model, true), signal });
+    }
+    throw e;
+  }
+}
+
+function readResponse(data) {
+  const c = data && data.candidates && data.candidates[0];
+  if (!c) {
+    const br = data && data.promptFeedback && data.promptFeedback.blockReason;
+    throw new Error(br ? `谷歌拒绝处理（${br}）` : '模型什么也没回');
+  }
+  const txt = ((c.content && c.content.parts) || []).filter(p => typeof p.text === 'string' && !p.thought).map(p => p.text).join('');
+  const u = data.usageMetadata;
+  return { txt, finish: c.finishReason, tokens: u && u.totalTokenCount };
+}
+
+function parseResults(txt, n) {
+  if (!txt) return null;
+  const t = txt.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+  let v = tryJson(t);
+  if (v === undefined) {
+    const s = t.indexOf('['), e = t.lastIndexOf(']');
+    if (s >= 0 && e > s) v = tryJson(t.slice(s, e + 1));
+  }
+  if (v && !Array.isArray(v) && typeof v === 'object') v = Object.values(v).find(Array.isArray) || ('text' in v ? [v] : undefined);
+  if (!Array.isArray(v)) return null;
+  const idxs = v.map(o => (o && typeof o === 'object') ? Number(o.index) : NaN);
+  const zeroBased = idxs.includes(0) && !idxs.includes(n);
+  const out = new Array(n).fill(null);
+  v.forEach((o, i) => {
+    if (o == null) return;
+    const text = typeof o === 'string' ? o : String(o.text ?? o.content ?? o.result ?? '');
+    let idx = Number.isInteger(idxs[i]) ? idxs[i] + (zeroBased ? 1 : 0) : NaN;
+    if (!(idx >= 1 && idx <= n) || out[idx - 1] !== null) idx = (i < n && out[i] === null) ? i + 1 : out.indexOf(null) + 1;
+    if (idx >= 1) out[idx - 1] = text;
+  });
+  return out;
+}
+
+function finishNote(f) {
+  return ({
+    MAX_TOKENS: '输出长度到顶被截断了，最后几张可能不全。',
+    SAFETY: '有内容被谷歌的安全过滤拦了。',
+    RECITATION: '有内容被谷歌的版权检测拦了。'
+  })[f] || `模型结束原因：${f}。`;
+}
+
+function humanError(e, model) {
+  if (!e) return '未知错误';
+  if (e.name === 'AbortError') return '已取消（或超过 3 分钟没回）';
+  const s = e.status, m = String(e.message || '');
+  if (s === 400 && /api[ _-]?key/i.test(m)) return 'Key 不对：看看是不是复制少了几位';
+  if (s === 400) return '请求被拒（400）：' + m;
+  if (s === 401 || s === 403) return `没权限（${s}）：${m}`;
+  if (s === 404) return `模型 ${model || ''} 不存在或已下线，点 ↻ 刷新名单`;
+  if (s === 429) return '额度打满了（429）：这分钟或今天的次数用完了，等一会儿或换个模型';
+  if (s >= 500) return `谷歌那边卡了一下（${s}），过几秒再点`;
+  if (e instanceof TypeError) return '网络不通，连不上谷歌接口';
+  return m || '未知错误';
+}
+
+/* ---------- model list ---------- */
+function rankModels(models) {
+  const BAD = /(image|tts|audio|live|native|embed|computer|robotics|aqa|learnlm|omni|veo|imagen|banana)/i;
+  const out = [];
+  for (const m of models || []) {
+    const id = String(m.name || '').replace(/^models\//, '');
+    if (!/^gemini-/.test(id) || !/flash/.test(id) || BAD.test(id)) continue;
+    if (!(m.supportedGenerationMethods || []).includes('generateContent')) continue;
+    const vm = /^gemini-(\d+)(?:\.(\d+))?/.exec(id);
+    out.push({
+      id,
+      lite: /lite/.test(id),
+      alias: /-latest$/.test(id),
+      pre: /(preview|exp)/.test(id),
+      pinned: /-\d{3}$|-\d{2}-\d{4}$/.test(id),
+      ver: vm ? (+vm[1]) * 100 + (+(vm[2] || 0)) : 0
+    });
+  }
+  out.sort((a, b) => (b.lite - a.lite) || (a.alias - b.alias) || (a.pre - b.pre) || (b.ver - a.ver) || (a.pinned - b.pinned) || a.id.localeCompare(b.id));
+  return out;
+}
+
+function fillModels(list, note, live) {
+  const sel = $('model');
+  const opt = m => `<option value="${escHtml(m.id)}">${escHtml(m.id)}${m.alias ? '（自动跟最新）' : m.pre ? '（预览版）' : ''}</option>`;
+  const lite = list.filter(m => m.lite), full = list.filter(m => !m.lite);
+  sel.innerHTML =
+    (lite.length ? `<optgroup label="Flash-Lite · 省额度">${lite.map(opt).join('')}</optgroup>` : '') +
+    (full.length ? `<optgroup label="Flash · 更准一点">${full.map(opt).join('')}</optgroup>` : '');
+  const ids = list.map(m => m.id);
+  const saved = lsGet(LS.model);
+  let pick = (saved && ids.includes(saved)) ? saved : ids.includes(DEFAULT_MODEL) ? DEFAULT_MODEL : (lite[0] || list[0] || {}).id;
+  if (pick) sel.value = pick;
+  if (live && saved && !ids.includes(saved) && pick) {
+    note = `上次用的 ${saved} 已经不在谷歌名单里，自动换成 ${pick}`;
+    lsSet(LS.model, pick);
+  }
+  $('modelHint').textContent = note || '';
+}
+
+async function loadModels({ silent = false } = {}) {
+  if (!getKey()) return false;
+  const btn = $('refreshModels');
+  btn.disabled = true;
+  $('refreshIcon').classList.add('animate-spin');
+  try {
+    let all = [], token = '', guard = 0;
+    do {
+      const data = await apiFetch(`${API}/models?pageSize=1000${token ? '&pageToken=' + encodeURIComponent(token) : ''}`, { method: 'GET' });
+      all = all.concat(data.models || []);
+      token = data.nextPageToken || '';
+    } while (token && ++guard < 5);
+    const list = rankModels(all);
+    if (!list.length) throw new Error('名单里没找到能看图的 Flash 模型');
+    lsSet(LS.models, JSON.stringify({ t: Date.now(), list }));
+    fillModels(list, `谷歌实时名单 · ${list.length} 个能用 · ${humanTime().slice(11)} 更新`, true);
+    if (!silent) toast('模型名单已更新');
+    return true;
+  } catch (e) {
+    const msg = humanError(e);
+    $('modelHint').textContent = '最新名单没拉到，先用旧名单：' + msg;
+    if (!silent) toast('名单没拉到：' + msg, 4000);
+    return false;
+  } finally {
+    btn.disabled = false;
+    $('refreshIcon').classList.remove('animate-spin');
+  }
+}
+$('refreshModels').addEventListener('click', () => { if (!getKey()) { toast('先存 Key'); return; } loadModels(); });
+$('model').addEventListener('change', () => lsSet(LS.model, $('model').value));
+
+/* ---------- images ---------- */
+function loadImage(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => resolve({ img, url });
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('decode')); };
+    img.src = url;
+  });
+}
+
+async function compress(file) {
+  const { img, url } = await loadImage(file);
+  try {
+    const w = img.naturalWidth, h = img.naturalHeight;
+    if (!w || !h) throw new Error('empty');
+    const s = Math.min(1, MAX_SIDE / Math.max(w, h));
+    const tw = Math.max(1, Math.round(w * s)), th = Math.max(1, Math.round(h * s));
+    const cv = document.createElement('canvas');
+    cv.width = tw; cv.height = th;
+    const ctx = cv.getContext('2d');
+    ctx.fillStyle = '#fff'; // 透明 PNG 转 JPEG 不垫白底会变黑
+    ctx.fillRect(0, 0, tw, th);
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(img, 0, 0, tw, th);
+    const dataUrl = cv.toDataURL('image/jpeg', JPEG_Q);
+    const b64 = dataUrl.slice(dataUrl.indexOf(',') + 1);
+    return { dataUrl, b64, w: tw, h: th, bytes: Math.round(b64.length * 3 / 4) };
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+async function addFiles(files) {
+  if (state.busy) { toast('识别中，等这一轮完了再加'); return; }
+  const imgs = files.filter(f => f && (/^image\//.test(f.type) || /\.(jpe?g|png|webp|gif|bmp|heic|heif|avif)$/i.test(f.name || '')));
+  if (!imgs.length) { toast('没认出图片文件'); return; }
+  const room = MAX_IMAGES - state.items.length;
+  if (room <= 0) { toast(`满了，最多 ${MAX_IMAGES} 张`); return; }
+  if (imgs.length > room) toast(`最多 ${MAX_IMAGES} 张，多出的 ${imgs.length - room} 张没收`);
+  let bad = 0;
+  for (const f of imgs.slice(0, room)) {
+    try {
+      const c = await compress(f);
+      state.items.push({ id: 'i' + (++state.seq), name: f.name || `图片${state.seq}.jpg`, orig: f.size || 0, ...c, text: '', done: false });
+      renderGrid();
+    } catch (e) { bad++; }
+  }
+  if (bad) toast(`${bad} 张图解不开（可能是 HEIC 这类浏览器不认识的格式），跳过了`, 4000);
+  renderAll();
+}
+
+$('fileInput').addEventListener('change', e => {
+  const files = [...e.target.files];
+  e.target.value = '';
+  addFiles(files);
+});
+
+document.addEventListener('paste', e => {
+  const items = (e.clipboardData && e.clipboardData.items) || [];
+  const files = [];
+  for (const it of items) {
+    if (it.kind !== 'file' || !/^image\//.test(it.type)) continue;
+    const f = it.getAsFile();
+    if (!f) continue;
+    const d = new Date();
+    const ext = (it.type.split('/')[1] || 'png').replace('jpeg', 'jpg');
+    files.push(new File([f], f.name && f.name !== 'image.png' ? f.name : `截图_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}_${files.length + 1}.${ext}`, { type: f.type }));
+  }
+  if (files.length) { e.preventDefault(); addFiles(files); }
+});
+
+const hasFiles = e => !!(e.dataTransfer && [...(e.dataTransfer.types || [])].includes('Files'));
+document.addEventListener('dragover', e => { if (hasFiles(e)) { e.preventDefault(); $('drop').classList.add('drop-hot'); } });
+document.addEventListener('dragleave', e => { if (!e.relatedTarget) $('drop').classList.remove('drop-hot'); });
+document.addEventListener('drop', e => {
+  $('drop').classList.remove('drop-hot');
+  if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) { e.preventDefault(); addFiles([...e.dataTransfer.files]); }
+});
+
+function renderGrid() {
+  $('grid').innerHTML = state.items.map((it, i) => `
+    <div class="relative aspect-square overflow-hidden rounded-lg bg-stone-200 ring-1 ring-stone-200 dark:bg-stone-800 dark:ring-stone-700">
+      <img src="${it.dataUrl}" alt="${escHtml(it.name)}" data-zoom="${it.id}" class="h-full w-full cursor-zoom-in object-cover">
+      <span class="pointer-events-none absolute left-1 top-1 rounded bg-black/60 px-1.5 text-[11px] font-bold text-white">${i + 1}</span>
+      ${it.done ? '<span class="pointer-events-none absolute bottom-1 left-1 rounded bg-emerald-600/90 px-1 text-[10px] font-bold text-white">✓</span>' : ''}
+      <button type="button" data-del="${it.id}" class="absolute right-1 top-1 h-6 w-6 rounded-full bg-black/60 text-sm leading-6 text-white" aria-label="删掉这张">×</button>
+    </div>`).join('');
+  $('count').textContent = `${state.items.length}/${MAX_IMAGES}`;
+  $('clearAll').hidden = !state.items.length;
+  const orig = state.items.reduce((s, x) => s + x.orig, 0), now = state.items.reduce((s, x) => s + x.bytes, 0);
+  $('sizeInfo').textContent = state.items.length ? `已压到长边 ${MAX_SIDE}px：原图 ${fmtKB(orig)} → 上传 ${fmtKB(now)}` : '';
+  updateRun();
+}
+
+$('grid').addEventListener('click', e => {
+  const del = e.target.closest('[data-del]');
+  if (del) {
+    if (state.busy) { toast('识别中，先别删'); return; }
+    state.items = state.items.filter(x => x.id !== del.dataset.del);
+    renderAll();
+    return;
+  }
+  const z = e.target.closest('[data-zoom]');
+  if (z) openLightbox(z.dataset.zoom);
+});
+
+let clearArmed = 0;
+$('clearAll').addEventListener('click', () => {
+  if (state.busy || !state.items.length) return;
+  const b = $('clearAll');
+  if (!clearArmed) {
+    b.textContent = '再点一次确认清空';
+    b.classList.add('text-red-600');
+    clearArmed = setTimeout(() => { clearArmed = 0; b.textContent = '清空'; b.classList.remove('text-red-600'); }, 3000);
+    return;
+  }
+  clearTimeout(clearArmed);
+  clearArmed = 0;
+  b.textContent = '清空';
+  b.classList.remove('text-red-600');
+  state.items = [];
+  renderAll();
+  toast('清空了');
+});
+
+function openLightbox(id) {
+  const it = state.items.find(x => x.id === id);
+  if (!it) return;
+  $('lbImg').src = it.dataUrl;
+  $('lightbox').hidden = false;
+}
+const closeLightbox = () => { $('lightbox').hidden = true; $('lbImg').removeAttribute('src'); };
+$('lightbox').addEventListener('click', closeLightbox);
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeLightbox(); });
+
+/* ---------- results ---------- */
+const grow = ta => { ta.style.height = 'auto'; ta.style.height = (ta.scrollHeight + 2) + 'px'; };
+
+function renderResults() {
+  const any = state.items.some(x => x.done);
+  $('resultsCard').hidden = $('exportCard').hidden = !any;
+  if (!any) { $('rows').innerHTML = ''; return; }
+  $('rows').innerHTML = state.items.map((it, i) => `
+    <div class="flex gap-3">
+      <button type="button" data-zoom="${it.id}" class="h-20 w-16 shrink-0 overflow-hidden rounded-lg bg-stone-200 ring-1 ring-stone-200 sm:h-28 sm:w-24 dark:bg-stone-800 dark:ring-stone-700" aria-label="看大图">
+        <img src="${it.dataUrl}" alt="" class="h-full w-full object-cover">
+      </button>
+      <div class="min-w-0 flex-1">
+        <div class="mb-1 flex items-center justify-between gap-2 text-xs text-stone-500 dark:text-stone-400">
+          <span class="truncate"><b class="text-stone-800 dark:text-stone-200">#${i + 1}</b> ${escHtml(it.name)}</span>
+          <button type="button" data-redo="${it.id}" class="shrink-0 rounded-md px-2 py-0.5 hover:bg-stone-100 disabled:opacity-40 dark:hover:bg-stone-800">↻ 单张重识</button>
+        </div>
+        <textarea data-id="${it.id}" rows="3" class="auto w-full rounded-xl border border-stone-300 bg-stone-50 p-3 text-base leading-relaxed outline-none focus:border-red-600 dark:border-stone-700 dark:bg-stone-950" placeholder="${it.done ? '（这张没认出字）' : '还没识别，点上面的开始识别'}"></textarea>
+      </div>
+    </div>`).join('');
+  $('rows').querySelectorAll('textarea[data-id]').forEach(ta => {
+    const it = state.items.find(x => x.id === ta.dataset.id);
+    ta.value = it ? it.text : '';
+    grow(ta);
+  });
+}
+
+$('rows').addEventListener('input', e => {
+  const ta = e.target.closest('textarea[data-id]');
+  if (!ta) return;
+  const it = state.items.find(x => x.id === ta.dataset.id);
+  if (it) it.text = ta.value;
+  grow(ta);
+});
+$('rows').addEventListener('click', e => {
+  const z = e.target.closest('[data-zoom]');
+  if (z) { openLightbox(z.dataset.zoom); return; }
+  const r = e.target.closest('[data-redo]');
+  if (r) run([r.dataset.redo]);
+});
+let resizeTimer = 0;
+window.addEventListener('resize', () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => $('rows').querySelectorAll('textarea[data-id]').forEach(grow), 150);
+});
+
+function renderAll() { renderGrid(); renderResults(); updateRun(); }
+
+/* ---------- run ---------- */
+function updateRun() {
+  const n = state.items.length, b = $('run');
+  b.disabled = state.busy || !n;
+  if (!state.busy) b.textContent = n ? `开始识别（${n} 张 · 1 次请求）` : '开始识别';
+  document.querySelectorAll('[data-redo]').forEach(x => { x.disabled = state.busy; });
+}
+
+const pacificDay = () => { try { return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Los_Angeles' }).format(new Date()); } catch (e) { return new Date().toISOString().slice(0, 10); } };
+function getUsage() { const u = tryJson(lsGet(LS.usage) || '{}') || {}; return u.d === pacificDay() ? (u.n || 0) : 0; }
+function bumpUsage() { lsSet(LS.usage, JSON.stringify({ d: pacificDay(), n: getUsage() + 1 })); renderUsage(); }
+function renderUsage() { const n = getUsage(); $('usage').textContent = n ? `今日本机已用 ${n} 次` : ''; }
+
+async function run(ids) {
+  if (state.busy) return;
+  if (!getKey()) { toast('先在 ① 里填 Key 并保存'); $('apiKey').focus(); return; }
+  const list = ids ? state.items.filter(x => ids.includes(x.id)) : state.items.slice();
+  if (!list.length) { toast('先上图'); return; }
+  const extra = $('extra').value.trim();
+  lsSet(LS.extra, extra);
+  let model = $('model').value || DEFAULT_MODEL;
+  const ctrl = new AbortController();
+  state.busy = true;
+  state.ctrl = ctrl;
+  updateRun();
+  $('cancel').hidden = false;
+  $('runStatus').textContent = '';
+  const t0 = performance.now();
+  const tick = setInterval(() => { $('run').innerHTML = `<span class="spin"></span> 识别中 ${list.length} 张 · ${((performance.now() - t0) / 1000).toFixed(1)}s`; }, 100);
+  const killer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
+  let note = '';
+  try {
+    let data;
+    try {
+      data = await callModel(model, list, extra, ctrl.signal);
+    } catch (e) {
+      if (e.status !== 404) throw e;
+      await loadModels({ silent: true }); // 模型被谷歌下线：拉新名单，换默认模型再来一次
+      const next = $('model').value;
+      if (!next || next === model) throw e;
+      note += `${model} 已下线，自动换成 ${next}。`;
+      model = next;
+      data = await callModel(model, list, extra, ctrl.signal);
+    }
+    bumpUsage();
+    const { txt, finish, tokens } = readResponse(data);
+    const res = parseResults(txt, list.length);
+    if (res) {
+      list.forEach((it, i) => { it.text = (res[i] == null ? '' : res[i]).replace(/\r\n/g, '\n').replace(/\s+$/, ''); it.done = true; });
+      const miss = res.filter(x => x === null).length;
+      if (miss) note += `有 ${miss} 张模型漏写了，可以点那张的「单张重识」。`;
+    } else {
+      list[0].text = txt || '';
+      list.forEach(it => { it.done = true; });
+      note += '模型没按格式回，原文整个塞在第 1 格了。';
+    }
+    if (finish && finish !== 'STOP') note += finishNote(finish);
+    const secs = ((performance.now() - t0) / 1000).toFixed(1);
+    $('runStatus').textContent = `✓ ${list.length} 张 · 1 次请求 · ${secs}s · ${model}${tokens ? ` · ${tokens} tokens` : ''}`;
+    if (note) toast(note, 5000);
+    renderAll();
+    if (!ids) $('resultsCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } catch (e) {
+    const msg = humanError(e, model);
+    $('runStatus').textContent = '✗ ' + msg;
+    toast(msg, 5000);
+  } finally {
+    clearInterval(tick);
+    clearTimeout(killer);
+    state.busy = false;
+    state.ctrl = null;
+    $('cancel').hidden = true;
+    updateRun();
+  }
+}
+$('run').addEventListener('click', () => run());
+$('cancel').addEventListener('click', () => { if (state.ctrl) state.ctrl.abort(); });
+$('extra').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) run(); });
+
+/* ---------- export ---------- */
+function collect() {
+  $('rows').querySelectorAll('textarea[data-id]').forEach(ta => {
+    const it = state.items.find(x => x.id === ta.dataset.id);
+    if (it) it.text = ta.value;
+  });
+  return state.items.map((it, i) => ({ n: i + 1, name: it.name, text: it.text || '' }));
+}
+
+function download(blob, name) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = name;
+  a.rel = 'noopener';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
+}
+
+const plainText = rows => rows.map(r => `【${r.n}】${r.name}\n${r.text}`).join('\n\n') + '\n';
+
+const PDF_BASE = 'background:#fff;color:#111;font-family:-apple-system,"PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK SC",sans-serif;font-size:13px;line-height:1.7;';
+
+async function exportPdf(rows) {
+  if (!window.html2pdf) throw new Error('PDF 组件还没加载好，过几秒再点，或者刷新页面');
+  const MM = 96 / 25.4, margin = [12, 12, 14, 12];
+  const innerW = Math.floor((210 - margin[1] - margin[3]) * MM);
+  const pageH = (297 - margin[0] - margin[2]) * MM;
+  const head = `<div class="pl" style="font-size:20px;font-weight:800;margin-bottom:2px">识别结果</div>` +
+    `<div class="pl" style="font-size:11px;color:#666;margin-bottom:14px">${humanTime()} · 共 ${rows.length} 张</div>`;
+  const block = r => `<div style="margin:0 0 14px 0">` +
+    `<div class="pl" style="font-weight:700;font-size:14px;border-bottom:1px solid #bbb;padding-bottom:3px;margin-bottom:6px">${r.n}. ${escHtml(r.name)}</div>` +
+    (r.text || '（空）').split('\n').map(l => `<div class="pl" style="white-space:pre-wrap;word-break:break-word;min-height:1.7em">${escHtml(l) || '&nbsp;'}</div>`).join('') +
+    `</div>`;
+  // 先量高度，再按约 5 页一段切块：整篇画成一张超长画布，手机 Safari 会直接画崩
+  const probe = document.createElement('div');
+  probe.style.cssText = `position:fixed;left:-99999px;top:0;width:${innerW}px;${PDF_BASE}`;
+  document.body.appendChild(probe);
+  probe.innerHTML = head;
+  const headH = probe.offsetHeight;
+  const heights = rows.map(r => { probe.innerHTML = block(r); return probe.offsetHeight; });
+  probe.remove();
+  const LIMIT = pageH * 5, chunks = [];
+  let cur = { html: head, h: headH, n: 0 };
+  rows.forEach((r, i) => {
+    if (cur.n && cur.h + heights[i] > LIMIT) { chunks.push(cur); cur = { html: '', h: 0, n: 0 }; }
+    cur.html += block(r); cur.h += heights[i]; cur.n++;
+  });
+  chunks.push(cur);
+  const mk = html => { const d = document.createElement('div'); d.style.cssText = PDF_BASE; d.innerHTML = html; return d; };
+  const opt = h => ({
+    margin, filename: fname('pdf'),
+    image: { type: 'jpeg', quality: 0.85 },
+    html2canvas: { scale: Math.max(0.75, Math.min(2, Math.sqrt(14e6 / (innerW * Math.max(h, 1))))), backgroundColor: '#ffffff', useCORS: true, logging: false },
+    jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' },
+    pagebreak: { mode: ['css', 'legacy'], avoid: '.pl' }
+  });
+  let w = html2pdf().set(opt(chunks[0].h)).from(mk(chunks[0].html)).toPdf();
+  for (const c of chunks.slice(1)) {
+    w = w.get('pdf').then(pdf => { pdf.addPage(); }).set(opt(c.h)).from(mk(c.html)).toContainer().toCanvas().toPdf();
+  }
+  await w.save();
+}
+
+const EXPORTERS = {
+  xlsx(rows) {
+    if (!window.XLSX) throw new Error('Excel 组件还没加载好，过几秒再点，或者刷新页面');
+    const ws = XLSX.utils.aoa_to_sheet([['序号', '图片文件名', '识别内容'], ...rows.map(r => [r.n, r.name, r.text])]);
+    ws['!cols'] = [{ wch: 6 }, { wch: 28 }, { wch: 80 }];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, '识别结果');
+    XLSX.writeFile(wb, fname('xlsx'));
+  },
+  csv(rows) {
+    const cell = v => { const s = String(v == null ? '' : v); return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+    const body = [['序号', '图片文件名', '识别内容'], ...rows.map(r => [r.n, r.name, r.text])].map(r => r.map(cell).join(',')).join('\r\n');
+    download(new Blob(['﻿' + body + '\r\n'], { type: 'text/csv;charset=utf-8' }), fname('csv'));
+  },
+  pdf: exportPdf,
+  doc(rows) {
+    const trs = rows.map(r => `<tr><td>${r.n}</td><td>${escHtml(r.name)}</td><td>${escHtml(r.text).replace(/\n/g, '<br>')}</td></tr>`).join('');
+    const html = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">' +
+      '<head><meta charset="utf-8"><title>识别结果</title>' +
+      '<!--[if gte mso 9]><xml><w:WordDocument><w:View>Print</w:View><w:Zoom>100</w:Zoom></w:WordDocument></xml><![endif]-->' +
+      '<style>body{font-family:"Microsoft YaHei","PingFang SC",SimSun,sans-serif;font-size:11pt}table{border-collapse:collapse;width:100%}th,td{border:1px solid #000;padding:4pt 6pt;vertical-align:top}th{background:#eeeeee}</style>' +
+      `</head><body><h2>识别结果</h2><p style="color:#666;font-size:9pt">${humanTime()} · 共 ${rows.length} 张</p>` +
+      `<table><tr><th width="8%">序号</th><th width="24%">图片文件名</th><th>识别内容</th></tr>${trs}</table></body></html>`;
+    download(new Blob(['﻿' + html], { type: 'application/msword' }), fname('doc'));
+  },
+  md(rows) {
+    const md = `# 识别结果\n\n> ${humanTime()} · 共 ${rows.length} 张\n\n` +
+      rows.map(r => `## ${r.n}. ${r.name}\n\n${(r.text || '（空）').split('\n').join('  \n')}\n`).join('\n');
+    download(new Blob([md], { type: 'text/markdown;charset=utf-8' }), fname('md'));
+  },
+  txt(rows) {
+    download(new Blob([plainText(rows)], { type: 'text/plain;charset=utf-8' }), fname('txt'));
+  }
+};
+
+$('exportCard').addEventListener('click', async e => {
+  const b = e.target.closest('[data-exp]');
+  if (!b || b.disabled) return;
+  const rows = collect();
+  if (!rows.length) { toast('没东西可导'); return; }
+  const label = b.textContent;
+  b.disabled = true;
+  b.innerHTML = '<span class="spin"></span>';
+  try {
+    await EXPORTERS[b.dataset.exp](rows);
+    toast(`${label} 已导出`);
+  } catch (err) {
+    toast('导出失败：' + (err && err.message ? err.message : err), 5000);
+  } finally {
+    b.disabled = false;
+    b.textContent = label;
+  }
+});
+
+$('copyAll').addEventListener('click', async () => {
+  const rows = collect();
+  const t = rows.length > 1 ? rows.map(r => `【${r.n}】\n${r.text}`).join('\n\n') : (rows[0] ? rows[0].text : '');
+  try {
+    await navigator.clipboard.writeText(t);
+    toast('全部文本已复制');
+  } catch (e) {
+    const ta = document.createElement('textarea');
+    ta.value = t;
+    ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
+    document.body.appendChild(ta);
+    ta.select();
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch (e2) { ok = false; }
+    ta.remove();
+    toast(ok ? '全部文本已复制' : '复制没成功，长按文字手动复制吧');
+  }
+});
+
+/* ---------- boot ---------- */
+function init() {
+  renderKey();
+  $('extra').value = lsGet(LS.extra) || '';
+  const cached = tryJson(lsGet(LS.models) || 'null');
+  if (cached && Array.isArray(cached.list) && cached.list.length) fillModels(cached.list, '上次的名单 · 正在向谷歌要最新的…', false);
+  else fillModels(FALLBACK_MODELS, getKey() ? '正在向谷歌要最新模型名单…' : '存好 Key 后，会自动向谷歌要最新的模型名单', false);
+  renderUsage();
+  renderAll();
+  if (getKey()) loadModels({ silent: true });
+}
+init();
+})();
+</script>
+</body>
+</html>
