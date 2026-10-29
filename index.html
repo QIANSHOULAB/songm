@@ -127,16 +127,18 @@
 
 const API = 'https://generativelanguage.googleapis.com/v1beta';
 const LS = {
-  key: 'gemini_ocr_api_key', model: 'gemini_ocr_model', extra: 'gemini_ocr_extra',
-  models: 'gemini_ocr_models', usage: 'gemini_ocr_usage', plain: 'gemini_ocr_plain_models'
+  key: 'gemini_ocr_api_key', model: 'gemini_ocr_model_v2', extra: 'gemini_ocr_extra',
+  models: 'gemini_ocr_models', usage: 'gemini_ocr_usage'
 };
 const MAX_IMAGES = 10, MAX_SIDE = 1024, JPEG_Q = 0.85, TIMEOUT_MS = 180000;
-const DEFAULT_MODEL = 'gemini-2.5-flash-lite';
-const FALLBACK_MODELS = [
-  { id: 'gemini-2.5-flash-lite', lite: true },
-  { id: 'gemini-flash-lite-latest', lite: true, alias: true },
-  { id: 'gemini-2.5-flash', lite: false },
-  { id: 'gemini-flash-latest', lite: false, alias: true }
+// 谷歌文档：2.5 系列只对以前用过的老用户开放，新项目用 3.5 Flash-Lite / 3.8 Flash
+const DEFAULT_MODEL = 'gemini-3.5-flash-lite';
+const PRESET_MODELS = [
+  { id: 'gemini-3.5-flash-lite', tag: '新 Key 首选' },
+  { id: 'gemini-3.8-flash', tag: '新 Key 可用' },
+  { id: 'gemini-2.5-flash-lite' },
+  { id: 'gemini-2.5-flash' },
+  { id: 'gemini-2.5-pro' }
 ];
 const SYSTEM_PROMPT = [
   '你是一台纯粹的手写 OCR 引擎，唯一任务是把图片里的文字原样转写出来。',
@@ -151,7 +153,7 @@ const SYSTEM_PROMPT = [
 ].join('\n');
 
 const $ = id => document.getElementById(id);
-const state = { items: [], busy: false, ctrl: null, keyMode: 'header', seq: 0 };
+const state = { items: [], busy: false, ctrl: null, seq: 0 };
 
 /* ---------- small helpers ---------- */
 const lsGet = k => { try { return localStorage.getItem(k); } catch (e) { return null; } };
@@ -164,7 +166,6 @@ const stamp = () => { const d = new Date(); return `${d.getFullYear()}${pad(d.ge
 const humanTime = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`; };
 const fname = ext => `鬼画符_${stamp()}.${ext}`;
 const fmtKB = b => b >= 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB';
-let plainModels = new Set(tryJson(lsGet(LS.plain) || '[]') || []);
 
 let toastTimer = 0;
 function toast(msg, ms = 2600) {
@@ -198,49 +199,39 @@ $('clearKey').addEventListener('click', () => {
   toast('Key 已从这台设备删掉');
 });
 
-/* ---------- Gemini calls ---------- */
+/* ---------- Gemini calls（Key 只走 URL 参数 ?key=，不加任何自定义请求头） ---------- */
+const modelName = m => String(m || '').trim().replace(/^models\//, '');
+const keyParam = () => 'key=' + encodeURIComponent(getKey());
+
 async function apiFetch(url, { method = 'POST', body, signal } = {}) {
-  const key = getKey();
-  const init = { method, signal, headers: {} };
-  if (body !== undefined) { init.headers['Content-Type'] = 'application/json'; init.body = JSON.stringify(body); }
-  let res = null;
-  if (state.keyMode === 'header') {
-    try {
-      res = await fetch(url, { ...init, headers: { ...init.headers, 'x-goog-api-key': key } });
-    } catch (e) {
-      if (e.name === 'AbortError') throw e;
-      state.keyMode = 'query'; // header blocked somewhere: fall back to ?key=
-    }
-  }
-  if (!res) res = await fetch(url + (url.includes('?') ? '&' : '?') + 'key=' + encodeURIComponent(key), init);
+  const init = { method, signal };
+  if (body !== undefined) { init.headers = { 'Content-Type': 'application/json' }; init.body = JSON.stringify(body); }
+  const res = await fetch(url, init);
   const raw = await res.text();
   const data = raw ? tryJson(raw) : {};
   if (!res.ok) {
-    const err = new Error((data && data.error && data.error.message) || `HTTP ${res.status}`);
+    const err = new Error((data && data.error && data.error.message) || raw.slice(0, 500) || res.statusText || '（谷歌没给说明）');
     err.status = res.status;
     throw err;
   }
-  if (data === undefined) throw new Error('谷歌回了看不懂的东西');
+  if (data === undefined) throw new Error('返回的不是 JSON：' + raw.slice(0, 300));
   return data;
 }
 
-function genConfig(model, plain) {
-  const g = { responseMimeType: 'application/json' };
-  const m = /^gemini-(\d+)/.exec(model);
-  const major = m ? +m[1] : 99;
-  if (major < 3) g.temperature = 0.1; // Gemini 3+ 官方建议保持默认温度，压低反而容易复读
-  if (!plain) {
-    g.responseSchema = {
+function genConfig(model) {
+  const g = {
+    temperature: 0.1,
+    responseMimeType: 'application/json',
+    responseSchema: {
       type: 'ARRAY',
       items: { type: 'OBJECT', properties: { index: { type: 'INTEGER' }, text: { type: 'STRING' } }, required: ['index', 'text'] }
-    };
-    if (/^gemini-2\.5-flash(?!-lite)/.test(model)) g.thinkingConfig = { thinkingBudget: 0 };
-    else if (major >= 3 && major < 99 && !/lite/.test(model)) g.thinkingConfig = { thinkingLevel: 'low' };
-  }
+    }
+  };
+  if (/^gemini-2\.5-flash(?!-lite)/.test(model)) g.thinkingConfig = { thinkingBudget: 0 };
   return g;
 }
 
-function buildBody(list, extra, model, plain) {
+function buildBody(list, extra, model) {
   const n = list.length;
   const parts = [{
     text: `下面共有 ${n} 张图片，按顺序编号 1 到 ${n}，每张图前面有编号标签。逐张转写。` +
@@ -254,31 +245,20 @@ function buildBody(list, extra, model, plain) {
   return {
     systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
     contents: [{ role: 'user', parts }],
-    generationConfig: genConfig(model, plain)
+    generationConfig: genConfig(model)
   };
 }
 
-async function callModel(model, list, extra, signal) {
-  const url = `${API}/models/${encodeURIComponent(model)}:generateContent`;
-  const plain = plainModels.has(model);
-  try {
-    return await apiFetch(url, { body: buildBody(list, extra, model, plain), signal });
-  } catch (e) {
-    // 这个模型不吃 schema / thinking 参数：记下来，以后对它直接发素版请求
-    if (e.status === 400 && !plain && /schema|thinking|generation_?config|unknown name|invalid json payload|not supported|response_?mime/i.test(e.message)) {
-      plainModels.add(model);
-      lsSet(LS.plain, JSON.stringify([...plainModels]));
-      return await apiFetch(url, { body: buildBody(list, extra, model, true), signal });
-    }
-    throw e;
-  }
+function callModel(model, list, extra, signal) {
+  const name = modelName(model);
+  return apiFetch(`${API}/models/${name}:generateContent?${keyParam()}`, { body: buildBody(list, extra, name), signal });
 }
 
 function readResponse(data) {
   const c = data && data.candidates && data.candidates[0];
   if (!c) {
     const br = data && data.promptFeedback && data.promptFeedback.blockReason;
-    throw new Error(br ? `谷歌拒绝处理（${br}）` : '模型什么也没回');
+    throw new Error(br ? `promptFeedback.blockReason = ${br}` : '返回里没有 candidates：' + JSON.stringify(data).slice(0, 300));
   }
   const txt = ((c.content && c.content.parts) || []).filter(p => typeof p.text === 'string' && !p.thought).map(p => p.text).join('');
   const u = data.usageMetadata;
@@ -309,25 +289,19 @@ function parseResults(txt, n) {
 }
 
 function finishNote(f) {
-  return ({
-    MAX_TOKENS: '输出长度到顶被截断了，最后几张可能不全。',
-    SAFETY: '有内容被谷歌的安全过滤拦了。',
-    RECITATION: '有内容被谷歌的版权检测拦了。'
-  })[f] || `模型结束原因：${f}。`;
+  return `finishReason = ${f}` + (({
+    MAX_TOKENS: '（输出到顶被截断，最后几张可能不全）',
+    SAFETY: '（被谷歌安全过滤拦了）',
+    RECITATION: '（被谷歌版权检测拦了）'
+  })[f] || '') + '。';
 }
 
-function humanError(e, model) {
+// 报错原样显示：HTTP 状态码 + 谷歌返回的 error.message，不做任何翻译和改写
+function rawError(e) {
   if (!e) return '未知错误';
-  if (e.name === 'AbortError') return '已取消（或超过 3 分钟没回）';
-  const s = e.status, m = String(e.message || '');
-  if (s === 400 && /api[ _-]?key/i.test(m)) return 'Key 不对：看看是不是复制少了几位';
-  if (s === 400) return '请求被拒（400）：' + m;
-  if (s === 401 || s === 403) return `没权限（${s}）：${m}`;
-  if (s === 404) return `模型 ${model || ''} 不存在或已下线，点 ↻ 刷新名单`;
-  if (s === 429) return '额度打满了（429）：这分钟或今天的次数用完了，等一会儿或换个模型';
-  if (s >= 500) return `谷歌那边卡了一下（${s}），过几秒再点`;
-  if (e instanceof TypeError) return '网络不通，连不上谷歌接口';
-  return m || '未知错误';
+  if (e.name === 'AbortError') return 'AbortError：已取消，或超过 3 分钟没有响应';
+  if (e.status) return `HTTP ${e.status}：${e.message}`;
+  return `${e.name || 'Error'}：${e.message || e}`;
 }
 
 /* ---------- model list ---------- */
@@ -335,7 +309,7 @@ function rankModels(models) {
   const BAD = /(image|tts|audio|live|native|embed|computer|robotics|aqa|learnlm|omni|veo|imagen|banana)/i;
   const out = [];
   for (const m of models || []) {
-    const id = String(m.name || '').replace(/^models\//, '');
+    const id = modelName(m.name);
     if (!/^gemini-/.test(id) || !/flash/.test(id) || BAD.test(id)) continue;
     if (!(m.supportedGenerationMethods || []).includes('generateContent')) continue;
     const vm = /^gemini-(\d+)(?:\.(\d+))?/.exec(id);
@@ -352,21 +326,17 @@ function rankModels(models) {
   return out;
 }
 
-function fillModels(list, note, live) {
+function fillModels(live, note) {
   const sel = $('model');
-  const opt = m => `<option value="${escHtml(m.id)}">${escHtml(m.id)}${m.alias ? '（自动跟最新）' : m.pre ? '（预览版）' : ''}</option>`;
-  const lite = list.filter(m => m.lite), full = list.filter(m => !m.lite);
+  const presetIds = PRESET_MODELS.map(m => m.id);
+  const more = (live || []).filter(m => m && m.id && !presetIds.includes(m.id));
+  const opt = (id, tag) => `<option value="${escHtml(id)}">${escHtml(id)}${tag ? '（' + escHtml(tag) + '）' : ''}</option>`;
   sel.innerHTML =
-    (lite.length ? `<optgroup label="Flash-Lite · 省额度">${lite.map(opt).join('')}</optgroup>` : '') +
-    (full.length ? `<optgroup label="Flash · 更准一点">${full.map(opt).join('')}</optgroup>` : '');
-  const ids = list.map(m => m.id);
+    `<optgroup label="预置（不用刷新，直接能选）">${PRESET_MODELS.map(m => opt(m.id, m.tag)).join('')}</optgroup>` +
+    (more.length ? `<optgroup label="谷歌实时名单">${more.map(m => opt(m.id, m.alias ? '自动跟最新' : m.pre ? '预览版' : '')).join('')}</optgroup>` : '');
+  const ids = presetIds.concat(more.map(m => m.id));
   const saved = lsGet(LS.model);
-  let pick = (saved && ids.includes(saved)) ? saved : ids.includes(DEFAULT_MODEL) ? DEFAULT_MODEL : (lite[0] || list[0] || {}).id;
-  if (pick) sel.value = pick;
-  if (live && saved && !ids.includes(saved) && pick) {
-    note = `上次用的 ${saved} 已经不在谷歌名单里，自动换成 ${pick}`;
-    lsSet(LS.model, pick);
-  }
+  sel.value = (saved && ids.includes(saved)) ? saved : DEFAULT_MODEL;
   $('modelHint').textContent = note || '';
 }
 
@@ -378,20 +348,19 @@ async function loadModels({ silent = false } = {}) {
   try {
     let all = [], token = '', guard = 0;
     do {
-      const data = await apiFetch(`${API}/models?pageSize=1000${token ? '&pageToken=' + encodeURIComponent(token) : ''}`, { method: 'GET' });
+      const data = await apiFetch(`${API}/models?${keyParam()}${token ? '&pageToken=' + encodeURIComponent(token) : ''}`, { method: 'GET' });
       all = all.concat(data.models || []);
       token = data.nextPageToken || '';
-    } while (token && ++guard < 5);
+    } while (token && ++guard < 10);
     const list = rankModels(all);
-    if (!list.length) throw new Error('名单里没找到能看图的 Flash 模型');
     lsSet(LS.models, JSON.stringify({ t: Date.now(), list }));
-    fillModels(list, `谷歌实时名单 · ${list.length} 个能用 · ${humanTime().slice(11)} 更新`, true);
+    fillModels(list, `谷歌实时名单已拉到 · 共 ${list.length} 个 Flash 系 · ${humanTime().slice(11)}`);
     if (!silent) toast('模型名单已更新');
     return true;
   } catch (e) {
-    const msg = humanError(e);
-    $('modelHint').textContent = '最新名单没拉到，先用旧名单：' + msg;
-    if (!silent) toast('名单没拉到：' + msg, 4000);
+    const msg = rawError(e);
+    $('modelHint').textContent = '实时名单没拉到：' + msg;
+    if (!silent) toast('实时名单没拉到：' + msg, 8000);
     return false;
   } finally {
     btn.disabled = false;
@@ -606,30 +575,20 @@ async function run(ids) {
   if (!list.length) { toast('先上图'); return; }
   const extra = $('extra').value.trim();
   lsSet(LS.extra, extra);
-  let model = $('model').value || DEFAULT_MODEL;
+  const model = modelName($('model').value || DEFAULT_MODEL);
   const ctrl = new AbortController();
   state.busy = true;
   state.ctrl = ctrl;
   updateRun();
   $('cancel').hidden = false;
   $('runStatus').textContent = '';
+  $('runStatus').className = 'min-w-0 break-words';
   const t0 = performance.now();
   const tick = setInterval(() => { $('run').innerHTML = `<span class="spin"></span> 识别中 ${list.length} 张 · ${((performance.now() - t0) / 1000).toFixed(1)}s`; }, 100);
   const killer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
   let note = '';
   try {
-    let data;
-    try {
-      data = await callModel(model, list, extra, ctrl.signal);
-    } catch (e) {
-      if (e.status !== 404) throw e;
-      await loadModels({ silent: true }); // 模型被谷歌下线：拉新名单，换默认模型再来一次
-      const next = $('model').value;
-      if (!next || next === model) throw e;
-      note += `${model} 已下线，自动换成 ${next}。`;
-      model = next;
-      data = await callModel(model, list, extra, ctrl.signal);
-    }
+    const data = await callModel(model, list, extra, ctrl.signal);
     bumpUsage();
     const { txt, finish, tokens } = readResponse(data);
     const res = parseResults(txt, list.length);
@@ -649,9 +608,10 @@ async function run(ids) {
     renderAll();
     if (!ids) $('resultsCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
   } catch (e) {
-    const msg = humanError(e, model);
-    $('runStatus').textContent = '✗ ' + msg;
-    toast(msg, 5000);
+    const msg = rawError(e);
+    $('runStatus').textContent = `✗ ${model} · ${msg}`;
+    $('runStatus').className = 'min-w-0 break-words text-red-600 dark:text-red-400';
+    toast(msg, 8000);
   } finally {
     clearInterval(tick);
     clearTimeout(killer);
@@ -809,8 +769,7 @@ function init() {
   renderKey();
   $('extra').value = lsGet(LS.extra) || '';
   const cached = tryJson(lsGet(LS.models) || 'null');
-  if (cached && Array.isArray(cached.list) && cached.list.length) fillModels(cached.list, '上次的名单 · 正在向谷歌要最新的…', false);
-  else fillModels(FALLBACK_MODELS, getKey() ? '正在向谷歌要最新模型名单…' : '存好 Key 后，会自动向谷歌要最新的模型名单', false);
+  fillModels(cached && Array.isArray(cached.list) ? cached.list : [], getKey() ? '预置模型直接能用；正在后台拉谷歌实时名单…' : '预置模型直接能用；存好 Key 后会再拉一份谷歌实时名单');
   renderUsage();
   renderAll();
   if (getKey()) loadModels({ silent: true });
