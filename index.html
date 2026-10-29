@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>鬼画符解码器 · 手写批量识别</title>
-<meta name="description" content="手写图片批量识别：只抓手写内容和它前面的标签，一条一行带复制键；也能整页转写。最多 10 张打包成一次 Gemini 请求。">
+<meta name="description" content="手写图片批量识别：只抓手写内容和它前面的标签，一条一行带复制键；也能整页转写。一次最多 5 张，每张单独识别。">
 <meta name="theme-color" content="#1c1917">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>👻</text></svg>">
 <script src="https://cdn.tailwindcss.com"></script>
@@ -26,7 +26,7 @@
 
   <header class="px-1">
     <h1 class="text-2xl font-black tracking-tight">鬼画符解码器 <span class="align-middle text-xl">👻</span></h1>
-    <p class="mt-1 text-sm text-stone-500 dark:text-stone-400">手写图片批量识别 · 最多 10 张打包成 1 次请求 · 只扣 1 次额度</p>
+    <p class="mt-1 text-sm text-stone-500 dark:text-stone-400">手写图片批量识别 · 一次最多 5 张 · 每张单独识别，准确优先</p>
   </header>
 
   <section class="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-stone-200 dark:bg-stone-900 dark:ring-stone-800">
@@ -57,13 +57,13 @@
 
   <section class="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-stone-200 dark:bg-stone-900 dark:ring-stone-800">
     <div class="mb-3 flex items-center justify-between">
-      <h2 class="font-bold">② 上图 <span id="count" class="ml-1 text-sm font-normal text-stone-500 dark:text-stone-400">0/10</span></h2>
+      <h2 class="font-bold">② 上图 <span id="count" class="ml-1 text-sm font-normal text-stone-500 dark:text-stone-400">0/5</span></h2>
       <button id="clearAll" type="button" class="text-xs text-stone-500 hover:text-red-600 dark:text-stone-400" hidden>清空</button>
     </div>
     <label id="drop" for="fileInput" class="flex cursor-pointer select-none flex-col items-center justify-center rounded-xl border-2 border-dashed border-stone-300 px-4 py-7 text-center transition hover:border-red-600 dark:border-stone-700">
       <span class="text-3xl">📷</span>
       <span class="mt-2 font-semibold">点这里选图 / 拍照</span>
-      <span class="mt-1 text-xs text-stone-500 dark:text-stone-400">电脑上也能直接拖进来，或者 Ctrl+V 粘贴截图 · 最多 10 张</span>
+      <span class="mt-1 text-xs text-stone-500 dark:text-stone-400">电脑上也能直接拖进来，或者 Ctrl+V 粘贴截图 · 最多 5 张</span>
     </label>
     <input id="fileInput" type="file" accept="image/*" multiple class="sr-only">
     <div id="grid" class="mt-3 grid grid-cols-4 gap-2 empty:hidden sm:grid-cols-5"></div>
@@ -136,7 +136,8 @@ const LS = {
   models: 'gemini_ocr_models', usage: 'gemini_ocr_usage', mode: 'gemini_ocr_mode'
 };
 // 长边 2048：整张 A4 表压到 1024 时中文小字只剩八九个像素，笔画糊掉
-const MAX_IMAGES = 10, MAX_SIDE = 2048, JPEG_Q = 0.85, TIMEOUT_MS = 180000;
+// 一次最多 5 张，每张单独一次请求：互不串味，模型只盯一张
+const MAX_IMAGES = 5, MAX_SIDE = 2048, JPEG_Q = 0.92, TIMEOUT_MS = 180000;
 // 谷歌文档：2.5 系列只对以前用过的老用户开放，新项目用 3.5 Flash-Lite / 3.8 Flash
 const DEFAULT_MODEL = 'gemini-3.5-flash-lite';
 const PRESET_MODELS = [
@@ -522,7 +523,7 @@ async function addFiles(files) {
   for (const f of imgs.slice(0, room)) {
     try {
       const c = await compress(f);
-      state.items.push({ id: 'i' + (++state.seq), name: f.name || `图片${state.seq}.jpg`, orig: f.size || 0, ...c, mode: 'text', text: '', fields: [], done: false });
+      state.items.push({ id: 'i' + (++state.seq), name: f.name || `图片${state.seq}.jpg`, orig: f.size || 0, ...c, mode: 'text', text: '', fields: [], done: false, status: 'idle', error: '', note: '' });
       renderGrid();
     } catch (e) { bad++; }
   }
@@ -563,7 +564,7 @@ function renderGrid() {
     <div class="relative aspect-square overflow-hidden rounded-lg bg-stone-200 ring-1 ring-stone-200 dark:bg-stone-800 dark:ring-stone-700">
       <img src="${it.dataUrl}" alt="${escHtml(it.name)}" data-zoom="${it.id}" class="h-full w-full cursor-zoom-in object-cover">
       <span class="pointer-events-none absolute left-1 top-1 rounded bg-black/60 px-1.5 text-[11px] font-bold text-white">${i + 1}</span>
-      ${it.done ? '<span class="pointer-events-none absolute bottom-1 left-1 rounded bg-emerald-600/90 px-1 text-[10px] font-bold text-white">✓</span>' : ''}
+      ${it.status === 'error' ? '<span class="pointer-events-none absolute bottom-1 left-1 rounded bg-red-600/90 px-1 text-[10px] font-bold text-white">✗</span>' : it.done ? '<span class="pointer-events-none absolute bottom-1 left-1 rounded bg-emerald-600/90 px-1 text-[10px] font-bold text-white">✓</span>' : ''}
       <button type="button" data-del="${it.id}" class="absolute right-1 top-1 h-6 w-6 rounded-full bg-black/60 text-sm leading-6 text-white" aria-label="删掉这张">×</button>
     </div>`).join('');
   $('count').textContent = `${state.items.length}/${MAX_IMAGES}`;
@@ -618,39 +619,37 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeLightbo
 const grow = ta => { ta.style.height = 'auto'; ta.style.height = (ta.scrollHeight + 2) + 'px'; };
 const isFields = it => it.done && it.mode === 'fields';
 
-const textRow = (it, i) => `
-    <div class="flex gap-3">
-      <button type="button" data-zoom="${it.id}" class="h-20 w-16 shrink-0 overflow-hidden rounded-lg bg-stone-200 ring-1 ring-stone-200 sm:h-28 sm:w-24 dark:bg-stone-800 dark:ring-stone-700" aria-label="看大图">
-        <img src="${it.dataUrl}" alt="" class="h-full w-full object-cover">
-      </button>
-      <div class="min-w-0 flex-1">
-        <div class="mb-1 flex items-center justify-between gap-2 text-xs text-stone-500 dark:text-stone-400">
-          <span class="truncate"><b class="text-stone-800 dark:text-stone-200">#${i + 1}</b> ${escHtml(it.name)}</span>
-          <button type="button" data-redo="${it.id}" class="shrink-0 rounded-md px-2 py-0.5 hover:bg-stone-100 disabled:opacity-40 dark:hover:bg-stone-800">↻ 单张重识</button>
-        </div>
-        <textarea data-id="${it.id}" rows="3" class="auto w-full rounded-xl border border-stone-300 bg-stone-50 p-3 text-base leading-relaxed outline-none focus:border-red-600 dark:border-stone-700 dark:bg-stone-950" placeholder="${it.done ? '（这张没认出字）' : '还没识别，点上面的开始识别'}"></textarea>
-      </div>
-    </div>`;
+const BTN_S = 'shrink-0 rounded-lg px-2.5 py-1.5 text-xs font-semibold active:scale-95 disabled:opacity-40';
 
-const fieldsCard = (it, i) => `
-    <div class="rounded-xl p-3 ring-1 ring-stone-200 dark:ring-stone-800">
-      <div class="mb-1 flex items-center gap-2">
-        <button type="button" data-zoom="${it.id}" class="h-11 w-11 shrink-0 overflow-hidden rounded-lg bg-stone-200 ring-1 ring-stone-200 dark:bg-stone-800 dark:ring-stone-700" aria-label="看大图">
-          <img src="${it.dataUrl}" alt="" class="h-full w-full object-cover">
-        </button>
-        <div class="min-w-0 flex-1 text-xs text-stone-500 dark:text-stone-400">
-          <div class="truncate"><b class="text-stone-800 dark:text-stone-200">#${i + 1}</b> ${escHtml(it.name)}</div>
-          <div>${it.fields.length} 条手写</div>
-        </div>
-        <button type="button" data-copyall="${it.id}" class="shrink-0 rounded-lg border border-stone-300 px-2.5 py-1.5 text-xs font-semibold active:scale-95 dark:border-stone-700">复制这张</button>
-        <button type="button" data-redo="${it.id}" class="shrink-0 rounded-lg px-2 py-1.5 text-xs hover:bg-stone-100 disabled:opacity-40 dark:hover:bg-stone-800">↻ 重识</button>
-      </div>
-      ${it.fields.length ? `<div class="divide-y divide-stone-100 dark:divide-stone-800">${it.fields.map((f, k) => `
+function cardBody(it) {
+  if (it.status === 'running') return '<p class="py-3 text-sm text-stone-500 dark:text-stone-400"><span class="spin"></span> 识别中…</p>';
+  const err = it.status === 'error' ? `<p class="break-words pt-2 text-sm text-red-600 dark:text-red-400">✗ ${escHtml(it.error)}</p>` : '';
+  if (!it.done) return err || '<p class="py-3 text-sm text-stone-500 dark:text-stone-400">还没识别</p>';
+  if (!isFields(it)) return err + `<textarea data-id="${it.id}" rows="3" class="auto mt-2 w-full rounded-xl border border-stone-300 bg-stone-50 p-3 text-base leading-relaxed outline-none focus:border-red-600 dark:border-stone-700 dark:bg-stone-950" placeholder="（这张没认出字）"></textarea>`;
+  if (!it.fields.length) return err + '<p class="py-3 text-sm text-stone-500 dark:text-stone-400">这张没找到手写内容</p>';
+  return err + `<div class="divide-y divide-stone-100 dark:divide-stone-800">${it.fields.map((f, k) => `
         <div class="flex items-center gap-2 py-1.5">
           <div class="w-24 shrink-0 break-words text-xs leading-snug text-stone-500 sm:w-40 dark:text-stone-400">${escHtml(f.label || '（没标签）')}</div>
           <textarea data-fid="${it.id}:${k}" rows="1" class="auto min-w-0 flex-1 rounded-lg border border-stone-300 bg-stone-50 px-2.5 py-1.5 text-base font-semibold leading-snug outline-none focus:border-red-600 dark:border-stone-700 dark:bg-stone-950"></textarea>
           <button type="button" data-copy="${it.id}:${k}" class="shrink-0 rounded-lg bg-stone-900 px-3 py-2 text-sm font-semibold text-white active:scale-95 dark:bg-stone-100 dark:text-stone-900">复制</button>
-        </div>`).join('')}</div>` : '<p class="py-2 text-sm text-stone-500 dark:text-stone-400">这张没找到手写内容</p>'}
+        </div>`).join('')}</div>`;
+}
+
+// 一张一块：标题 → 原图 → 这张的识别结果
+const card = (it, i) => `
+    <div class="overflow-hidden rounded-xl ring-1 ring-stone-200 dark:ring-stone-800">
+      <div class="flex items-center gap-2 border-b border-stone-100 px-3 py-2 dark:border-stone-800">
+        <div class="min-w-0 flex-1 truncate text-sm"><b>第 ${i + 1} 张</b> <span class="text-xs text-stone-500 dark:text-stone-400">${escHtml(it.name)}${isFields(it) && it.status !== 'running' ? ` · ${it.fields.length} 条手写` : ''}</span></div>
+        ${it.done && it.status !== 'running' ? `<button type="button" data-copyall="${it.id}" class="${BTN_S} border border-stone-300 dark:border-stone-700">复制这张</button>` : ''}
+        <button type="button" data-redo="${it.id}" class="${BTN_S} hover:bg-stone-100 dark:hover:bg-stone-800">↻ 重识</button>
+      </div>
+      <button type="button" data-zoom="${it.id}" class="block w-full bg-stone-100 dark:bg-stone-950" aria-label="看大图">
+        <img src="${it.dataUrl}" alt="" class="mx-auto block max-h-72 w-auto max-w-full object-contain">
+      </button>
+      <div class="px-3 pb-2">
+        ${it.note ? `<p class="pt-2 text-xs text-amber-700 dark:text-amber-400">${escHtml(it.note)}</p>` : ''}
+        ${cardBody(it)}
+      </div>
     </div>`;
 
 function fieldBox(fid) {
@@ -660,10 +659,11 @@ function fieldBox(fid) {
 }
 
 function renderResults() {
-  const any = state.items.some(x => x.done);
-  $('resultsCard').hidden = $('exportCard').hidden = !any;
+  const any = state.items.some(x => x.status && x.status !== 'idle');
+  $('resultsCard').hidden = !any;
+  $('exportCard').hidden = !state.items.some(x => x.done);
   if (!any) { $('rows').innerHTML = ''; return; }
-  $('rows').innerHTML = state.items.map((it, i) => isFields(it) ? fieldsCard(it, i) : textRow(it, i)).join('');
+  $('rows').innerHTML = state.items.map(card).join('');
   $('rows').querySelectorAll('textarea[data-id]').forEach(ta => {
     const it = byId(ta.dataset.id);
     ta.value = it ? it.text : '';
@@ -695,8 +695,10 @@ $('rows').addEventListener('click', async e => {
   }
   const ca = e.target.closest('[data-copyall]');
   if (ca) {
-    const vals = [...$('rows').querySelectorAll(`textarea[data-fid^="${ca.dataset.copyall}:"]`)].map(t => t.value);
-    flash(ca, await copyText(vals.join('\n')));
+    const id = ca.dataset.copyall;
+    const fts = [...$('rows').querySelectorAll(`textarea[data-fid^="${id}:"]`)];
+    const tx = $('rows').querySelector(`textarea[data-id="${id}"]`);
+    flash(ca, await copyText(fts.length ? fts.map(t => t.value).join('\n') : (tx ? tx.value : '')));
     return;
   }
   const r = e.target.closest('[data-redo]');
@@ -714,7 +716,7 @@ function renderAll() { renderGrid(); renderResults(); updateRun(); }
 function updateRun() {
   const n = state.items.length, b = $('run');
   b.disabled = state.busy || !n;
-  if (!state.busy) b.textContent = n ? `开始识别（${n} 张 · 1 次请求）` : '开始识别';
+  if (!state.busy) b.textContent = n ? `开始识别（${n} 张 · 每张单独识别）` : '开始识别';
   document.querySelectorAll('[data-redo]').forEach(x => { x.disabled = state.busy; });
 }
 
@@ -722,6 +724,21 @@ const pacificDay = () => { try { return new Intl.DateTimeFormat('en-CA', { timeZ
 function getUsage() { const u = tryJson(lsGet(LS.usage) || '{}') || {}; return u.d === pacificDay() ? (u.n || 0) : 0; }
 function bumpUsage() { lsSet(LS.usage, JSON.stringify({ d: pacificDay(), n: getUsage() + 1 })); renderUsage(); }
 function renderUsage() { const n = getUsage(); $('usage').textContent = n ? `今日本机已用 ${n} 次` : ''; }
+
+function applyResult(it, { txt, finish }, runMode) {
+  it.note = finish && finish !== 'STOP' ? finishNote(finish) : '';
+  if (runMode === 'fields') {
+    const res = parseFields(txt, 1);
+    if (res && res[0] !== null) { it.mode = 'fields'; it.fields = res[0]; }
+    else { it.mode = 'text'; it.text = txt || ''; it.note += '模型没按格式回，下面是它的原话。'; }
+  } else {
+    const res = parseText(txt, 1);
+    it.mode = 'text';
+    it.text = String(res && res[0] != null ? res[0] : (txt || '')).replace(/\r\n/g, '\n').replace(/\s+$/, '');
+  }
+  it.done = true;
+  it.status = 'done';
+}
 
 async function run(ids) {
   if (state.busy) return;
@@ -735,62 +752,46 @@ async function run(ids) {
   const ctrl = new AbortController();
   state.busy = true;
   state.ctrl = ctrl;
-  updateRun();
+  list.forEach(it => { it.status = 'running'; it.error = ''; it.note = ''; });
   $('cancel').hidden = false;
   $('runStatus').textContent = '';
   $('runStatus').className = 'min-w-0 break-words';
+  renderAll();
+  if (!ids) $('resultsCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
   const t0 = performance.now();
-  const tick = setInterval(() => { $('run').innerHTML = `<span class="spin"></span> 识别中 ${list.length} 张 · ${((performance.now() - t0) / 1000).toFixed(1)}s`; }, 100);
+  let finished = 0, tokens = 0;
+  const tick = setInterval(() => { $('run').innerHTML = `<span class="spin"></span> 识别中 ${finished}/${list.length} · ${((performance.now() - t0) / 1000).toFixed(1)}s`; }, 100);
   const killer = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
-  let note = '', extraInfo = '';
-  try {
-    const data = await callModel(model, list, extra, runMode, ctrl.signal);
-    bumpUsage();
-    const { txt, finish, tokens } = readResponse(data);
-    if (runMode === 'fields') {
-      const res = parseFields(txt, list.length);
-      if (res) {
-        list.forEach((it, i) => { it.mode = 'fields'; it.fields = res[i] || []; it.done = true; });
-        const miss = res.filter(x => x === null).length;
-        if (miss) note += `有 ${miss} 张模型漏了，可以点那张的「↻ 重识」。`;
-        extraInfo = ` · 共 ${list.reduce((s, it) => s + it.fields.length, 0)} 条手写`;
-      } else {
-        list.forEach(it => { it.mode = 'fields'; it.fields = []; it.done = true; });
-        list[0].mode = 'text';
-        list[0].text = txt || '';
-        note += '模型没按格式回，原文整个塞在第 1 张里了。';
-      }
-    } else {
-      const res = parseText(txt, list.length);
-      if (res) {
-        list.forEach((it, i) => { it.mode = 'text'; it.text = (res[i] == null ? '' : res[i]).replace(/\r\n/g, '\n').replace(/\s+$/, ''); it.done = true; });
-        const miss = res.filter(x => x === null).length;
-        if (miss) note += `有 ${miss} 张模型漏写了，可以点那张的「单张重识」。`;
-      } else {
-        list.forEach(it => { it.mode = 'text'; it.done = true; });
-        list[0].text = txt || '';
-        note += '模型没按格式回，原文整个塞在第 1 格了。';
-      }
+  // 每张图单独一次请求，同时发出：互不串味，一张出错不连累别的
+  await Promise.all(list.map(async it => {
+    try {
+      const data = await callModel(model, [it], extra, runMode, ctrl.signal);
+      bumpUsage();
+      const r = readResponse(data);
+      tokens += r.tokens || 0;
+      applyResult(it, r, runMode);
+    } catch (e) {
+      it.status = 'error';
+      it.error = `${model} · ${rawError(e)}`;
+    } finally {
+      finished++;
+      renderAll();
     }
-    if (finish && finish !== 'STOP') note += finishNote(finish);
-    const secs = ((performance.now() - t0) / 1000).toFixed(1);
-    $('runStatus').textContent = `✓ ${list.length} 张 · 1 次请求 · ${secs}s · ${model} · ${MODE_NAME[runMode]}${extraInfo}${tokens ? ` · ${tokens} tokens` : ''}`;
-    if (note) toast(note, 5000);
-    renderAll();
-    if (!ids) $('resultsCard').scrollIntoView({ behavior: 'smooth', block: 'start' });
-  } catch (e) {
-    const msg = rawError(e);
-    $('runStatus').textContent = `✗ ${model} · ${msg}`;
+  }));
+  clearInterval(tick);
+  clearTimeout(killer);
+  state.busy = false;
+  state.ctrl = null;
+  $('cancel').hidden = true;
+  const ok = list.filter(x => x.status === 'done').length, bad = list.length - ok;
+  const secs = ((performance.now() - t0) / 1000).toFixed(1);
+  const nf = runMode === 'fields' ? ` · 共 ${list.reduce((s, x) => s + (x.status === 'done' && isFields(x) ? x.fields.length : 0), 0)} 条手写` : '';
+  $('runStatus').textContent = `${bad ? '⚠' : '✓'} ${ok}/${list.length} 张成功 · ${list.length} 次请求 · ${secs}s · ${model} · ${MODE_NAME[runMode]}${nf}${tokens ? ` · ${tokens} tokens` : ''}`;
+  if (bad) {
     $('runStatus').className = 'min-w-0 break-words text-red-600 dark:text-red-400';
-    toast(msg, 8000);
-  } finally {
-    clearInterval(tick);
-    clearTimeout(killer);
-    state.busy = false;
-    state.ctrl = null;
-    $('cancel').hidden = true;
-    updateRun();
+    toast(`${bad} 张没成功，原因写在那张底下，点那张的「↻ 重识」再来`, 6000);
   }
+  renderAll();
 }
 $('run').addEventListener('click', () => run());
 $('cancel').addEventListener('click', () => { if (state.ctrl) state.ctrl.abort(); });
